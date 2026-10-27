@@ -1,0 +1,21 @@
+.idea/
+.vscode/
+*.iml
+
+backend/target/
+**/target/
+
+frontend/dist/
+frontend/node_modules/
+frontend/coverage/
+frontend/.vite/
+
+.env
+*.log
+
+data/
+uploads/
+
+### Operating systems
+.DS_Store
+Thumbs.db
