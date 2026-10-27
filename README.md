@@ -2,7 +2,7 @@
 
 V2 是对旧版 Ginkgo 美食地图的渐进式重构。第一阶段采用模块化单体：业务代码按领域分开，运行时仍是一个 Spring Boot 进程，数据使用 MySQL，缓存与会话基础设施使用 Redis。
 
-独立仓库：[kanno111/ginkgo-food-map-v2](https://github.com/kanno111/ginkgo-food-map-v2)。默认分支为 `develop`，历史从原 develop 的 V2 重构基线开始保留。推送 develop 后自动检查并发布，结果见[GitHub Actions](https://github.com/kanno111/ginkgo-food-map-v2/actions)。
+独立仓库：[kanno111/ginkgo-food-map-v2](https://github.com/kanno111/ginkgo-food-map-v2)。默认分支为 `develop`，历史从原 develop 的 V2 重构基线开始保留。推送 develop 后由 GitHub 检查构建，服务器自托管 Runner 主动下载已检查产物并在本地发布，无需对 GitHub 开放入站 SSH。结果见[GitHub Actions](https://github.com/kanno111/ginkgo-food-map-v2/actions)。
 
 ## 当前阶段
 

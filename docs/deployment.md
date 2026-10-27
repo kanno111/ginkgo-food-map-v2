@@ -6,7 +6,9 @@
 
 项目迁入独立仓库 [kanno111/ginkgo-food-map-v2](https://github.com/kanno111/ginkgo-food-map-v2)，默认分支为 `develop`。新历史从原 develop 的 V2 重构基线开始，随后保存登录、注册及 CI/CD 修改，不包含基线之前的旧系统提交。
 
-服务器 `8.137.98.235` 已完成旧 Java 应用清理和新项目运行环境准备。流水线位于 [ci-cd.yml](../.github/workflows/ci-cd.yml)，部署 Secrets 需要在新仓库配置，原仓库的 Secrets 不会自动继承。首次推送 develop 后，在[新仓库 Actions](https://github.com/kanno111/ginkgo-food-map-v2/actions)查看实际执行结果。
+服务器 `8.137.98.235` 使用自托管 GitHub Actions Runner 执行发布，前后端构建和测试仍在 GitHub 托管机器运行。流水线位于 [ci-cd.yml](../.github/workflows/ci-cd.yml)，实际执行结果见[新仓库 Actions](https://github.com/kanno111/ginkgo-food-map-v2/actions)。
+
+此前首轮检查全部通过，但 GitHub 托管 Runner 无法连接仅允许本机来源的 SSH，发布步骤以255退出。现改为服务器主动连接 GitHub、下载同一次检查的产物并在本地发布，自动发布不再依赖入站 SSH；原有 SSH 来源限制继续保留。
 
 访问地址为 `http://8.137.98.235`。首次成功发布前返回 HTTP 503 和 `Application deployment pending`；成功后提供页面和业务接口。当前仅配置 HTTP，尚未配置域名和 HTTPS。
 
@@ -19,7 +21,7 @@
 3. 检查部署脚本语法，运行发布、失败回滚及 HTTP 健康检查测试。
 4. 三项检查全部通过后，取本次运行生成的 JAR 和前端产物，打包并生成 SHA-256 校验文件，不在服务器重新构建源码。产物保留7天。
 5. 发布开始前核对远程 `develop` 最新提交；若当前提交已经被新推送取代，跳过本次发布。发布任务串行执行，不中断正在切换版本的任务。
-6. 通过校验服务器主机密钥的 SSH 连接上传，服务器再次验证校验和、压缩包路径和提交号，然后原子切换当前版本链接并重启后端。
+6. 服务器上的 `ginkgo-deploy` Runner 下载本次运行的产物，将发布包和脚本复制到本地待发布目录。发布脚本再次验证校验和、压缩包路径和提交号，然后原子切换当前版本链接并重启后端。
 7. 同时验证后端健康、前端提交号、登录页面、公开 API 及匿名认证响应。失败时尝试恢复上一版程序，并将本次 Actions 标记为失败。
 
 在 GitHub 仓库的 **Actions → CI and automatic deployment** 查看每个步骤及失败日志。检查失败时不会进入发布，线上已有版本继续运行。流水线核对的是发布开始时的最新提交；发布期间若又有推送，后续通过检查的版本会继续更新。
@@ -31,8 +33,9 @@
 | 系统 | Ubuntu 24.04，OpenJDK 21 |
 | 访问入口 | 宿主机 Nginx，80端口，页面和 `/auth/`、`/api/` 同源 |
 | 后端 | `ginkgo-backend.service`，用户 `ginkgo`，监听 `127.0.0.1:8080` |
-| 发布账号 | `ginkgo-deploy`，独立 SSH 密钥；sudo 仅允许重启、停止该后端服务 |
-| 上传目录 | `/opt/ginkgo/incoming/<提交号>-<运行编号>-<重试编号>/` |
+| 发布账号 | `ginkgo-deploy`，运行自托管 Runner；sudo 仅允许重启、停止该后端服务 |
+| 发布 Runner | `/opt/ginkgo-runner`，名称 `ginkgo-production`，标签 `self-hosted`、`Linux`、`X64`、`ginkgo-deploy` |
+| 待发布目录 | `/opt/ginkgo/incoming/<提交号>-<运行编号>-<重试编号>/` |
 | 版本目录 | `/opt/ginkgo/releases/<版本编号>/`，包含 JAR、前端及提交号 |
 | 当前版本 | `/opt/ginkgo/current`，链接到一个版本目录 |
 | 后端配置 | `/etc/ginkgo/backend.env`，仅管理员可读写，由 systemd 注入 |
@@ -45,19 +48,27 @@
 
 服务器运行配置中的数据库、Redis、SMTP、验证码 HMAC 及 JWT 密钥不进入 Git、构建产物或部署日志。RSA 和 HMAC 密钥由服务器独立生成。systemd 已设置开机启动；首次由流水线发布产物时启动后端服务。
 
-## GitHub Secrets
+## 发布 Runner 与权限
 
-仓库 Settings → Secrets and variables → Actions 中已配置下列 Repository Secrets：
+Runner 以独立的 `ginkgo-deploy` 用户运行，并通过 systemd 开机启动。服务器主动通过 HTTPS 连接 GitHub 和产物下载服务，不需要为 GitHub 开放22端口，也不需要固定 GitHub Runner 的出口 IP。
 
-| 名称 | 用途 |
-| --- | --- |
-| `DEPLOY_HOST` | 服务器地址 |
-| `DEPLOY_PORT` | SSH 端口 |
-| `DEPLOY_USER` | `ginkgo-deploy` 部署账号 |
-| `DEPLOY_SSH_KEY` | 独立 CI 部署私钥 |
-| `DEPLOY_KNOWN_HOSTS` | 已核验的服务器 SSH 主机公钥记录 |
+在仓库 **Settings → Actions → Runners** 确认 `ginkgo-production` 为 Online/Idle。服务器检查方式：
 
-CI 部署私钥的本机副本位于用户目录 `.ssh/ginkgo_ci_ed25519`，不在项目目录。服务器保留原有管理员 SSH 登录能力；管理员密钥没有配置给 Actions。轮换密钥或重装服务器后，需要同步更新对应 Secret 和服务器授权记录。
+```bash
+cd /opt/ginkgo-runner
+sudo ./svc.sh status
+# 需要维护时，由管理员停止或重新启动；不要在发布过程中重启 Runner。
+sudo ./svc.sh stop
+sudo ./svc.sh start
+```
+
+Runner 只用于本仓库可信 `develop` 推送的发布任务，不用于外部 Pull Request 或不可信代码的构建。修改工作流、推送 develop 以及管理 Runner 的权限等同于发布权限，应只授予可信维护者。Runner 用户不能读取 root 专属的应用环境配置，也没有通用 sudo、Docker 管理权限。
+
+首次注册使用仓库管理 API 签发的短期注册令牌，只用于本次配置，不提交到代码或保存到工作流 Secrets。Runner 注册后由自身凭据连接 GitHub；每次发布读取 GitHub API 使用只读、限本任务有效的 `GITHUB_TOKEN`，不保存个人访问令牌。
+
+重装服务器时，在上述 Runners 页面移除失效记录并按 **New self-hosted runner** 的说明下载安装包，核对 SHA-256；以 `ginkgo-deploy` 用户注册，名称使用 `ginkgo-production`、自定义标签使用 `ginkgo-deploy`，工作目录使用 `_work`。随后由管理员在安装目录执行 `./svc.sh install ginkgo-deploy` 和 `./svc.sh start`。
+
+旧 SSH 发布使用的 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和 `DEPLOY_KNOWN_HOSTS` Secrets 已不被工作流读取。本次保留这些历史配置及本机 SSH 密钥；管理员 SSH 继续只从原有允许来源访问。
 
 ## 发布后的检查与排查
 

@@ -97,8 +97,9 @@ jobs:
   deploy:
     name: Deploy checked commit
     needs: [backend, frontend, deployment-checks]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-24.04
+    # 服务器 Runner 只执行本仓库可信 develop 的发布，构建与测试仍在 GitHub 托管机器运行。
+    if: github.repository == 'kanno111/ginkgo-food-map-v2' && github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: [self-hosted, Linux, X64, ginkgo-deploy]
     timeout-minutes: 20
     # 不取消正在切换版本的部署，避免进程被中断后留下半完成状态。
     concurrency:
@@ -111,17 +112,27 @@ jobs:
       - name: Skip a commit superseded while checks were running
         id: latest
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          latest="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/develop" --jq .object.sha)"
-          if [[ "$latest" == "$GITHUB_SHA" ]]; then
-            echo 'current=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'current=false' >> "$GITHUB_OUTPUT"
-            echo 'A newer develop commit exists; skipping this deployment.'
-          fi
+          # 使用系统 Python，服务器无需安装 gh，也不保存长期 GitHub 访问令牌。
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/heads/develop"
+          request = urllib.request.Request(url, headers={
+              'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'],
+              'Accept': 'application/vnd.github+json',
+              'User-Agent': 'ginkgo-deployment',
+          })
+          with urllib.request.urlopen(request, timeout=30) as response:
+              latest = json.load(response)['object']['sha']
+          current = latest == os.environ['GITHUB_SHA']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"current={str(current).lower()}\n")
+          if not current:
+              print('A newer develop commit exists; skipping this deployment.')
+          PY
       - uses: actions/download-artifact@v4
         if: steps.latest.outputs.current == 'true'
         with:
@@ -145,35 +156,19 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > release/frontend/version.txt
           tar -czf release.tar.gz -C release backend.jar frontend commit.txt
           sha256sum release.tar.gz > SHA256SUMS
-      - name: Upload and activate release
+      - name: Activate release on this server
         if: steps.latest.outputs.current == 'true'
         shell: bash
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          port="${DEPLOY_PORT:-22}"
-          # 参数经校验再用于 SSH 命令；不把 Secrets 直接插入 shell 源码。
-          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
-          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 ))
-          [[ -n "$DEPLOY_SSH_KEY" && -n "$DEPLOY_KNOWN_HOSTS" ]]
-          install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
-          trap 'rm -f "$HOME/.ssh/deploy_key"' EXIT
-          ssh_options=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          # Runner 由 ginkgo-deploy 运行，本地复制产物；自动发布不再连接入站 SSH。
+          [[ "$(id -un)" == 'ginkgo-deploy' ]]
           release_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          remote="${DEPLOY_USER}@${DEPLOY_HOST}"
+          [[ "$release_id" =~ ^[a-f0-9]{40}-[0-9]+-[0-9]+$ ]]
           incoming="/opt/ginkgo/incoming/${release_id}"
-          ssh "${ssh_options[@]}" -p "$port" "$remote" "mkdir -p '$incoming'"
-          scp "${ssh_options[@]}" -P "$port" release.tar.gz SHA256SUMS deploy/deploy.sh deploy/healthcheck.py "$remote:$incoming/"
-          ssh "${ssh_options[@]}" -p "$port" "$remote" "bash '$incoming/deploy.sh' '$release_id'"
+          mkdir -m 700 "$incoming"
+          cp release.tar.gz SHA256SUMS deploy/deploy.sh deploy/healthcheck.py "$incoming/"
+          bash "$incoming/deploy.sh" "$release_id"
 
   deployment-checks:
     name: Deployment checks
