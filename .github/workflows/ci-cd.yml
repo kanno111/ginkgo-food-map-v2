@@ -1,0 +1,189 @@
+name: CI and automatic deployment
+
+# 只处理 develop 分支推送；检查全部通过后自动部署同一提交。
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # 仅供本次临时 CI 容器使用，不是开发或生产凭据。
+          MYSQL_ROOT_PASSWORD: ci-only-mysql-password
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Verify including real MySQL and Redis integration tests
+        working-directory: backend
+        env:
+          AUTH_TEST_DB_PASSWORD: ci-only-mysql-password
+        run: mvn --batch-mode --no-transfer-progress verify -Dredis.integration=true -Dauth.integration=true
+      - name: Save test reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Save checked JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: checked-backend
+          path: backend/target/ginkgo-food-map-backend-*.jar
+          retention-days: 7
+          if-no-files-found: error
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint, test, typecheck and build
+        working-directory: frontend
+        run: npm run check
+      - name: Save checked frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: checked-frontend
+          path: frontend/dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy checked commit
+    needs: [backend, frontend, deployment-checks]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # 不取消正在切换版本的部署，避免进程被中断后留下半完成状态。
+    concurrency:
+      group: ginkgo-server-deployment
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Skip a commit superseded while checks were running
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/develop" --jq .object.sha)"
+          if [[ "$latest" == "$GITHUB_SHA" ]]; then
+            echo 'current=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'current=false' >> "$GITHUB_OUTPUT"
+            echo 'A newer develop commit exists; skipping this deployment.'
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.latest.outputs.current == 'true'
+        with:
+          name: checked-backend
+          path: release/backend
+      - uses: actions/download-artifact@v4
+        if: steps.latest.outputs.current == 'true'
+        with:
+          name: checked-frontend
+          path: release/frontend
+      - name: Package the exact artifacts that passed checks
+        if: steps.latest.outputs.current == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=(release/backend/*.jar)
+          test "${#jars[@]}" -eq 1
+          mv "${jars[0]}" release/backend.jar
+          printf '%s\n' "$GITHUB_SHA" > release/commit.txt
+          printf '%s\n' "$GITHUB_SHA" > release/frontend/version.txt
+          tar -czf release.tar.gz -C release backend.jar frontend commit.txt
+          sha256sum release.tar.gz > SHA256SUMS
+      - name: Upload and activate release
+        if: steps.latest.outputs.current == 'true'
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          port="${DEPLOY_PORT:-22}"
+          # 参数经校验再用于 SSH 命令；不把 Secrets 直接插入 shell 源码。
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 ))
+          [[ -n "$DEPLOY_SSH_KEY" && -n "$DEPLOY_KNOWN_HOSTS" ]]
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/deploy_key"' EXIT
+          ssh_options=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          release_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote="${DEPLOY_USER}@${DEPLOY_HOST}"
+          incoming="/opt/ginkgo/incoming/${release_id}"
+          ssh "${ssh_options[@]}" -p "$port" "$remote" "mkdir -p '$incoming'"
+          scp "${ssh_options[@]}" -P "$port" release.tar.gz SHA256SUMS deploy/deploy.sh deploy/healthcheck.py "$remote:$incoming/"
+          ssh "${ssh_options[@]}" -p "$port" "$remote" "bash '$incoming/deploy.sh' '$release_id'"
+
+  deployment-checks:
+    name: Deployment checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check script syntax and release failure handling
+        run: |
+          bash -n deploy/deploy.sh
+          python3 -m unittest discover -s deploy/tests -v

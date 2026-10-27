@@ -1,0 +1,2 @@
+# 服务器和 GitHub runner 使用 Bash，检出时保持 LF，避免 Windows 换行破坏脚本。
+deploy/*.sh text eol=lf
