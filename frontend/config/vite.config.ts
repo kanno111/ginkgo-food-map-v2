@@ -21,6 +21,11 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080',
           changeOrigin: true,
         },
+        // 认证接口按后端既有约定使用 /auth 前缀，不在开发代理中改写路径。
+        '/auth': {
+          target: env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080',
+          changeOrigin: true,
+        },
       },
     },
     test: {

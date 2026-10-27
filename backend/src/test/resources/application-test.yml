@@ -4,9 +4,6 @@ spring:
     username: sa
     password:
     driver-class-name: org.h2.Driver
-  jpa:
-    hibernate:
-      ddl-auto: none
   flyway:
     enabled: false
   cache:
@@ -15,3 +12,12 @@ spring:
     redis:
       repositories:
         enabled: false
+
+app:
+  user:
+    verification-code:
+      # 仅供自动化测试完成配置校验，不得复制到生产环境。
+      hmac-secret: test-only-hmac-secret-at-least-32-characters
+    verification-mail:
+      from: no-reply@example.test
+      subject-prefix: "[测试]"

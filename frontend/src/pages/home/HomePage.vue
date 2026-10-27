@@ -15,19 +15,19 @@ const capabilities = [
         <p class="eyebrow">UESTC · CHENGDU FOOD GUIDE</p>
         <h1>认真吃饭，<br /><span>认真记录。</span></h1>
         <p class="summary">
-          新版前端已经切换到 Vue 3。接下来会把地图、店铺、评价和登录功能逐个从旧页面迁入组件。
+          使用电子科技大学学生邮箱创建账号并登录。地图、店铺和评价功能会继续逐步开放。
         </p>
         <div class="hero-actions">
-          <button class="primary-action" type="button" disabled>浏览美食地图</button>
-          <a href="#migration">查看迁移进度</a>
+          <RouterLink class="primary-action" to="/register">注册账号</RouterLink>
+          <RouterLink to="/login">登录账号</RouterLink>
         </div>
       </div>
 
       <aside class="hero-card" aria-label="项目当前状态">
         <span class="cup">杯</span>
         <p>当前阶段</p>
-        <strong>Vue 工程基线</strong>
-        <small>页面功能正在从旧版渐进迁移</small>
+        <strong>注册与账号登录</strong>
+        <small>只向电子科技大学学生开放</small>
       </aside>
     </section>
 

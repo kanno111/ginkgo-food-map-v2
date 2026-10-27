@@ -1,0 +1,128 @@
+<script setup lang="ts">
+import { onBeforeUnmount, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useLoginStore } from '../model/login.store'
+
+const router = useRouter()
+const auth = useLoginStore()
+const form = reactive({ username: '', password: '' })
+const validation = ref<string | null>(null)
+auth.clearError()
+
+/** 密码只留在表单内，完成提交或离开页面后清除，绝不规范化密码中的空格。 */
+async function handleSubmit() {
+  validation.value = null
+  auth.clearError()
+  if (!form.username.trim() || !form.password) {
+    validation.value = '请输入用户名和密码。'
+    return
+  }
+  const success = await auth.submit({ username: form.username.trim(), password: form.password })
+  form.password = ''
+  if (success) await router.replace('/')
+}
+
+onBeforeUnmount(() => {
+  form.password = ''
+})
+</script>
+
+<template>
+  <form class="login-form" aria-labelledby="login-title" @submit.prevent="handleSubmit">
+    <p class="eyebrow">WELCOME BACK</p>
+    <h1 id="login-title">欢迎回来。</h1>
+    <p class="form-intro">使用注册时设置的用户名和密码登录。</p>
+    <div class="form-field">
+      <label for="login-username">用户名</label>
+      <input
+        id="login-username"
+        v-model="form.username"
+        autocomplete="username"
+        maxlength="32"
+        placeholder="请输入用户名"
+        :disabled="auth.loggingIn"
+      />
+    </div>
+    <div class="form-field">
+      <label for="login-password">密码</label>
+      <input
+        id="login-password"
+        v-model="form.password"
+        type="password"
+        autocomplete="current-password"
+        placeholder="请输入密码"
+        :disabled="auth.loggingIn"
+      />
+    </div>
+    <p v-if="validation || auth.error" class="form-error" role="alert">
+      {{ validation || auth.error }}
+    </p>
+    <button class="primary-action" type="submit" :disabled="auth.loggingIn || auth.restoring">
+      {{ auth.loggingIn ? '正在登录…' : '登录' }}
+    </button>
+    <p class="form-footnote">
+      还没有账号？<RouterLink to="/register">使用校园邮箱注册</RouterLink>
+    </p>
+  </form>
+</template>
+
+<style scoped>
+.login-form {
+  padding: clamp(28px, 5vw, 46px);
+  border: 1px solid #ded7c9;
+  border-radius: 34px;
+  background: #fffdf8;
+  box-shadow: 0 24px 70px rgb(76 54 8 / 10%);
+}
+h1 {
+  margin: 8px 0 12px;
+  font-family: Georgia, 'Songti SC', serif;
+  font-size: clamp(36px, 5vw, 52px);
+}
+.form-intro,
+.form-footnote {
+  color: #6b6357;
+  line-height: 1.7;
+}
+.form-field {
+  margin-top: 24px;
+}
+label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 14px;
+  font-weight: 800;
+}
+input {
+  width: 100%;
+  height: 50px;
+  padding: 0 15px;
+  border: 1px solid #d8d0c2;
+  border-radius: 14px;
+  color: #2b2a26;
+  background: #fff;
+  font: inherit;
+}
+input:focus {
+  outline: 2px solid #b67c00;
+  outline-offset: 2px;
+}
+.form-error {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  color: #8b2f29;
+  background: #fbe7e3;
+  line-height: 1.6;
+}
+button {
+  width: 100%;
+  margin-top: 28px;
+  cursor: pointer;
+}
+.form-footnote {
+  margin: 20px 0 0;
+  font-size: 14px;
+  text-align: center;
+}
+</style>

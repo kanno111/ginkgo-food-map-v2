@@ -1,0 +1,42 @@
+# 本文件可以提交，只展示本地配置结构，不得填写真实 SMTP 密码或生产密钥。
+# 首次使用时复制为 application-local.yml，并只修改复制后的本地文件。
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/ginkgo_food_map?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: replace-with-local-mysql-password
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: ""
+      database: 4
+      timeout: 2s
+  mail:
+    # 中国内地（杭州）邮件推送使用 smtpdm.aliyun.com；其他区域按阿里云控制台修改。
+    host: smtpdm.aliyun.com
+    # 阿里云邮件推送支持在 80 端口使用 STARTTLS，避免 ECS 默认禁用的 25 端口。
+    port: 80
+    # 用户名必须是邮件推送控制台中创建的完整发信地址。
+    username: replace-with-sender@example.com
+    # 必须填写该发信地址单独设置的 SMTP 密码，不是阿里云登录密码或 AccessKey。
+    password: replace-with-smtp-password
+    properties:
+      "[mail.smtp.auth]": true
+      "[mail.smtp.starttls.enable]": true
+      "[mail.smtp.starttls.required]": true
+      "[mail.smtp.connectiontimeout]": 5000
+      "[mail.smtp.timeout]": 5000
+      "[mail.smtp.writetimeout]": 5000
+
+app:
+  user:
+    verification-code:
+      # 请替换为至少32个字符的本机随机密钥；该值只用于计算验证码 HMAC。
+      hmac-secret: replace-with-at-least-32-random-characters
+    verification-mail:
+      # 必须与上面的 spring.mail.username 完全一致。
+      from: replace-with-sender@example.com

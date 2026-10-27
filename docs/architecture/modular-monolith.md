@@ -32,7 +32,7 @@ security -> user
 file     <- restaurant / review
 ```
 
-图中表示业务协作关系，不代表可以访问对方 Repository。跨模块协作必须通过公开接口或事件完成。
+图中表示业务协作关系，不代表可以访问对方 Mapper。跨模块协作必须通过公开接口或事件完成。
 
 ## 部署形态
 

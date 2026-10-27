@@ -1,6 +1,6 @@
 # Ginkgo 前端
 
-生产前端采用 Vue 3 + TypeScript + Vite，使用 Vue Router 管理页面、Pinia 管理客户端状态、Axios 访问 Java API。生产环境由 Nginx 提供静态文件并将 `/api` 转发到 Spring Boot。
+生产前端采用 Vue 3 + TypeScript + Vite，使用 Vue Router 管理页面、Pinia 管理客户端状态、Axios 访问 Java API。生产环境由 Nginx 提供静态文件并将 `/api` 与 `/auth` 转发到 Spring Boot。
 
 ## 工程目录
 
@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Vite 默认监听 `http://localhost:5173`，并把 `/api` 代理到 `http://localhost:8080`。如需修改开发代理目标：
+Vite 默认监听 `http://localhost:5173`，并把 `/api` 和 `/auth` 代理到 `http://localhost:8080`。如需修改开发代理目标：
 
 ```powershell
 $env:VITE_DEV_PROXY_TARGET="http://localhost:8081"
