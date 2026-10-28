@@ -16,7 +16,7 @@ describe('login form', () => {
   let pinia: ReturnType<typeof createPinia>
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: ['/', '/login', '/register', '/password-reset'].map((path) => ({
+    routes: ['/', '/login', '/register', '/password-reset', '/restaurants/new'].map((path) => ({
       path,
       component: { template: '<div />' },
     })),
@@ -88,5 +88,21 @@ describe('login form', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/'))
     expect(login).toHaveBeenCalledWith({ username: 'ginkgo_user', password: ' Ginkgo2026 ' })
     expect(host.querySelector<HTMLInputElement>('#login-password')?.value).toBe('')
+  })
+
+  it.each([
+    ['/restaurants/new', '/restaurants/new'],
+    ['https://untrusted.example', '/'],
+    ['//untrusted.example', '/'],
+  ])('limits post-login return destinations: %s', async (redirect, expected) => {
+    await router.push({ path: '/login', query: { redirect } })
+    vi.mocked(login).mockResolvedValue({
+      accessToken: 'test-return-session',
+      tokenType: 'Bearer',
+      expiresAt: '2099-01-01T00:00:00Z',
+      user: { id: 42, username: 'ginkgo_user', roles: ['ROLE_USER'] },
+    })
+    await fillAndSubmit('ginkgo_user', 'Ginkgo2026')
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe(expected))
   })
 })

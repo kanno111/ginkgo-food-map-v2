@@ -50,7 +50,9 @@ jobs:
         working-directory: backend
         env:
           AUTH_TEST_DB_PASSWORD: ci-only-mysql-password
-        run: mvn --batch-mode --no-transfer-progress verify -Dredis.integration=true -Dauth.integration=true
+          # 餐厅迁移测试使用同一个临时MySQL服务，但创建自己专属的随机数据库。
+          RESTAURANT_TEST_DB_PASSWORD: ci-only-mysql-password
+        run: mvn --batch-mode --no-transfer-progress verify -Dredis.integration=true -Dauth.integration=true -Drestaurant.integration=true
       - name: Save test reports even on failure
         if: always()
         uses: actions/upload-artifact@v4

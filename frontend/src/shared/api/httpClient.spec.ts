@@ -33,8 +33,25 @@ describe('authenticated HTTP client', () => {
     await httpClient.post('/auth/password-reset', {})
     await httpClient.post('/auth/email/code/password-reset', {})
     await httpClient.get('/api/public/status')
+    await httpClient.get('/api/restaurant-categories')
+    await httpClient.get('/api/restaurants')
+    await httpClient.get('/api/restaurants/1')
     expect(sent[0]?.headers.Authorization).toBe('Bearer current-session')
     for (const config of sent.slice(1)) expect(config.headers.Authorization).toBeUndefined()
+  })
+
+  it('keeps authentication on restaurant management and all writes', async () => {
+    const sent: InternalAxiosRequestConfig[] = []
+    httpClient.defaults.adapter = async (config) => {
+      sent.push(config)
+      return response(config)
+    }
+    await httpClient.get('/api/restaurants/1/management')
+    await httpClient.post('/api/restaurants', {})
+    await httpClient.put('/api/restaurants/1', {})
+    await httpClient.delete('/api/restaurants/1')
+    await httpClient.post('/api/restaurants/1/restore')
+    for (const config of sent) expect(config.headers.Authorization).toBe('Bearer current-session')
   })
 
   it('clears a rejected session but keeps it on temporary service failures', async () => {

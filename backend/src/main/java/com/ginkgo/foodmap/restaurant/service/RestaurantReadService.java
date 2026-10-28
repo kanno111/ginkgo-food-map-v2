@@ -1,0 +1,94 @@
+package com.ginkgo.foodmap.restaurant.service;
+
+import com.ginkgo.foodmap.common.exception.BusinessException;
+import com.ginkgo.foodmap.restaurant.dto.RestaurantListQuery;
+import com.ginkgo.foodmap.restaurant.entity.RestaurantEntity;
+import com.ginkgo.foodmap.restaurant.entity.RestaurantTagEntity;
+import com.ginkgo.foodmap.restaurant.exception.RestaurantErrorCode;
+import com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper;
+import com.ginkgo.foodmap.restaurant.vo.RestaurantCategoryVo;
+import com.ginkgo.foodmap.restaurant.vo.RestaurantPageVo;
+import com.ginkgo.foodmap.restaurant.vo.RestaurantVo;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 公开餐厅读取应用服务，不访问其他模块的表或 Mapper，不推测尚未存在的评价。
+ * MySQL REPEATABLE_READ只读事务保证COUNT、记录与标签来自同一快照，避免并发修改导致口径漂移。
+ */
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+public class RestaurantReadService {
+    private final RestaurantCatalogMapper mapper;
+
+    /** 返回受控分类全集及启用状态，历史分类不会因停用而消失。 */
+    public List<RestaurantCategoryVo> categories() {
+        return mapper.selectCategories().stream().map(entity -> {
+            RestaurantCategoryVo vo = new RestaurantCategoryVo();
+            vo.setCode(entity.getCode());
+            vo.setName(entity.getName());
+            vo.setSortOrder(entity.getSortOrder());
+            vo.setEnabled(entity.isEnabled());
+            return vo;
+        }).toList();
+    }
+
+    /** 数据库完成全局查询后只批量补充当前页标签，不进行页内筛选或重新排序。 */
+    public RestaurantPageVo list(RestaurantListQuery query) {
+        long total = mapper.countVisible(query);
+        List<RestaurantEntity> rows = query.getOffset() >= total ? List.of() : mapper.selectVisiblePage(query);
+        Map<Long, List<String>> tags = tagsFor(rows);
+        RestaurantPageVo page = new RestaurantPageVo();
+        page.setRecords(rows.stream().map(row -> toVo(row, tags.getOrDefault(row.getId(), List.of()))).toList());
+        page.setTotal(total);
+        page.setPage(query.getPage());
+        page.setPageSize(query.getPageSize());
+        page.setTotalPages(total / query.getPageSize() + (total % query.getPageSize() == 0 ? 0 : 1));
+        return page;
+    }
+
+    /** 正整数ID限定在Java Long范围，已删除和不存在使用统一错误，不暴露任何管理元数据。 */
+    public RestaurantVo detail(String id) {
+        long value = RestaurantIdentifiers.id(id);
+        RestaurantEntity row = mapper.selectVisibleById(value);
+        if (row == null) throw new BusinessException(RestaurantErrorCode.NOT_FOUND);
+        return toVo(row, tagsFor(List.of(row)).getOrDefault(row.getId(), List.of()));
+    }
+
+    private Map<Long, List<String>> tagsFor(List<RestaurantEntity> rows) {
+        if (rows.isEmpty()) return Map.of();
+        return mapper.selectVisibleTags(rows.stream().map(RestaurantEntity::getId).toList()).stream()
+                .collect(Collectors.groupingBy(RestaurantTagEntity::getRestaurantId,
+                        Collectors.mapping(RestaurantTagEntity::getTag, Collectors.toList())));
+    }
+
+    /** 显式映射输出白名单；评分空态由VO默认值表达，不写入可手工修改的统计列。 */
+    static RestaurantVo toVo(RestaurantEntity row, List<String> tags) {
+        RestaurantVo vo = new RestaurantVo();
+        vo.setId(row.getId().toString());
+        vo.setName(row.getName());
+        vo.setCategoryCode(row.getCategoryCode());
+        vo.setCategoryName(row.getCategoryName());
+        vo.setPricePerPerson(row.getPricePerPerson());
+        vo.setPriceKind(row.getPriceKind());
+        vo.setAddress(row.getAddress());
+        vo.setLatitude(row.getLatitude());
+        vo.setLongitude(row.getLongitude());
+        vo.setCoordinateSystem(row.getCoordinateSystem());
+        vo.setNeedsLocation(row.isNeedsLocation());
+        vo.setBusinessStatus(row.getBusinessStatus());
+        vo.setSourceType(row.getSourceType());
+        vo.setCreatedAt(row.getCreatedAt());
+        vo.setUpdatedAt(row.getUpdatedAt());
+        vo.setDistanceKm(row.getDistanceKm());
+        vo.setTags(tags);
+        return vo;
+    }
+}

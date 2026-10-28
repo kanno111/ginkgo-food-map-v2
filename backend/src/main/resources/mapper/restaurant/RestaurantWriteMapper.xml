@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ginkgo.foodmap.restaurant.mapper.RestaurantWriteMapper">
+    <select id="selectManagementById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantManagementEntity">
+        SELECT <include refid="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper.publicColumns"/>,
+            r.created_by, r.updated_by, r.deleted_at
+        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code WHERE r.id = #{id}
+    </select>
+
+    <select id="lockById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantManagementEntity">
+        SELECT id, category_code, created_by, deleted_at FROM restaurants WHERE id = #{id} FOR UPDATE
+    </select>
+
+    <select id="lockCategory" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantCategoryEntity">
+        SELECT code, name, sort_order, enabled FROM restaurant_categories WHERE code = #{code} FOR SHARE
+    </select>
+
+    <!-- 最多8项，全部参数绑定。窗口函数保留大小写/重音等价标签中的首个原文，顺序不变。 -->
+    <select id="distinctTags" resultType="string">
+        SELECT tag FROM (
+            SELECT tag, position, ROW_NUMBER() OVER (
+                PARTITION BY tag COLLATE utf8mb4_0900_ai_ci ORDER BY position
+            ) AS duplicate_order FROM (
+                <foreach collection="tags" item="tag" index="position" separator=" UNION ALL ">
+                    SELECT CONVERT(#{tag} USING utf8mb4) AS tag, #{position} AS position
+                </foreach>
+            ) candidates
+        ) normalized WHERE duplicate_order = 1 ORDER BY position
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO restaurants(name, category_code, price_per_person, price_kind, address, latitude, longitude,
+            coordinate_system, needs_location, business_status, source_type, created_by, updated_by)
+        VALUES (#{name}, #{categoryCode}, #{pricePerPerson}, #{priceKind}, #{address}, #{latitude}, #{longitude},
+            #{coordinateSystem}, FALSE, #{businessStatus}, 'USER', #{createdBy}, #{updatedBy})
+    </insert>
+
+    <update id="updateCurrent">
+        UPDATE restaurants SET name=#{row.name}, category_code=#{row.categoryCode},
+            price_per_person=#{row.pricePerPerson}, price_kind=#{row.priceKind}, address=#{row.address},
+            latitude=#{row.latitude}, longitude=#{row.longitude}, coordinate_system=#{row.coordinateSystem},
+            needs_location=FALSE, business_status=#{row.businessStatus}, updated_by=#{actor},
+            updated_at=CURRENT_TIMESTAMP(6)
+        WHERE id=#{row.id} AND deleted_at IS NULL
+            AND (#{admin} OR created_by=#{actor})
+    </update>
+
+    <update id="softDeleteCurrent">
+        UPDATE restaurants SET deleted_at=CURRENT_TIMESTAMP(6), deleted_by=#{actor},
+            delete_reason_code=CASE WHEN #{admin} THEN 'ADMIN_REMOVAL' ELSE 'OWNER_REQUEST' END,
+            updated_by=#{actor}, updated_at=CURRENT_TIMESTAMP(6)
+        WHERE id=#{id} AND deleted_at IS NULL AND (#{admin} OR created_by=#{actor})
+    </update>
+
+    <update id="restoreCurrent">
+        UPDATE restaurants SET deleted_at=NULL, deleted_by=NULL, delete_reason_code=NULL,
+            updated_by=#{actor}, updated_at=CURRENT_TIMESTAMP(6)
+        WHERE id=#{id} AND deleted_at IS NOT NULL
+    </update>
+
+    <delete id="deleteTags">DELETE FROM restaurant_tags WHERE restaurant_id=#{id}</delete>
+    <insert id="insertTags">
+        INSERT INTO restaurant_tags(restaurant_id, tag, position) VALUES
+        <foreach collection="tags" item="tag" index="position" separator=",">(#{id}, #{tag}, #{position})</foreach>
+    </insert>
+    <select id="selectTags" resultType="string">
+        SELECT tag FROM restaurant_tags WHERE restaurant_id=#{id} ORDER BY position
+    </select>
+</mapper>

@@ -1,23 +1,59 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { previewRestaurants } from '../model/catalog.preview'
+import axios from 'axios'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { toErrorMessage } from '@/shared/lib/toErrorMessage'
+import { fetchRestaurant } from '../api/restaurantApi'
+import type { RestaurantReadModel } from '../model/restaurant.types'
 import { campusDistance, priceLabel, ratingDimensions, tierOf } from '../model/catalog.logic'
 import CupBadge from './CupBadge.vue'
+import RestaurantManagementActions from './RestaurantManagementActions.vue'
 
 const props = defineProps<{ id: string }>()
-const restaurant = computed(() => previewRestaurants.find((candidate) => candidate.id === props.id))
+const restaurant = ref<RestaurantReadModel | null>(null)
+const loading = ref(true)
+const error = ref<string | null>(null)
+let controller: globalThis.AbortController | undefined
+let generation = 0
+const demo = computed(() => restaurant.value?.tags.includes('联调模拟') ?? false)
 const distance = computed(() => (restaurant.value ? campusDistance(restaurant.value) : null))
 const copyFeedback = ref<string | null>(null)
 const manualCopyText = ref('')
 
-// 路由复用组件时清除上一家店的复制内容，避免将地址与当前店名混淆。
+/** 路由复用和失败重试都独立读取；取消旧请求，避免旧店资料覆盖新页面。 */
+async function loadDetail(): Promise<void> {
+  const requestGeneration = ++generation
+  controller?.abort()
+  controller = new globalThis.AbortController()
+  const signal = controller.signal
+  restaurant.value = null
+  loading.value = true
+  error.value = null
+  copyFeedback.value = null
+  manualCopyText.value = ''
+  try {
+    const result = await fetchRestaurant(props.id, signal)
+    if (requestGeneration === generation) restaurant.value = result
+  } catch (reason) {
+    if (requestGeneration !== generation || signal.aborted) return
+    // 只有真实404才展示“没有找到”，临时断网和服务故障必须允许重试。
+    if (!axios.isAxiosError(reason) || reason.response?.status !== 404) {
+      error.value = toErrorMessage(reason)
+    }
+  } finally {
+    if (requestGeneration === generation) loading.value = false
+  }
+}
 watch(
   () => props.id,
   () => {
-    copyFeedback.value = null
-    manualCopyText.value = ''
+    void loadDetail()
   },
+  { immediate: true },
 )
+onUnmounted(() => {
+  generation += 1
+  controller?.abort()
+})
 
 /** 剪贴板权限或HTTP环境受限时提供可选中文本，不把未复制的操作宣告为成功。 */
 async function copyText(text: string): Promise<void> {
@@ -44,19 +80,33 @@ function shareRestaurant(): void {
     globalThis.location.origin,
   )
   void copyText(
-    `${restaurant.value.name}\n${restaurant.value.address}\n${link.href}\n原版候选目录预览，营业与消费信息尚未核实。`,
+    `${restaurant.value.name}\n${restaurant.value.address}\n${link.href}\n${demo.value ? '联调模拟数据，仅供测试。' : '营业与消费信息请出发前核实。'}`,
   )
 }
 </script>
 
 <template>
-  <article v-if="restaurant" class="restaurant-detail" aria-labelledby="restaurant-title">
+  <section v-if="loading" class="missing-restaurant" role="status">正在加载餐厅资料…</section>
+  <section v-else-if="error" class="missing-restaurant" role="alert">
+    <h1>餐厅资料暂时无法加载。</h1>
+    <p>{{ error }}</p>
+    <button type="button" class="primary-action" @click="loadDetail">重新加载</button>
+    <RouterLink to="/">返回餐厅目录</RouterLink>
+  </section>
+  <article v-else-if="restaurant" class="restaurant-detail" aria-labelledby="restaurant-title">
     <div class="detail-breadcrumb">
       <RouterLink to="/">← 返回餐厅目录</RouterLink
-      ><span>原版候选目录 / {{ restaurant.category }}</span>
+      ><span>餐厅目录 / {{ restaurant.category }}</span>
     </div>
     <p class="detail-preview" role="note">
-      目录预览 · 此店沿用原版候选信息，尚未核实当前营业、地址及消费，暂无真实评价。
+      {{
+        demo
+          ? '联调模拟 · 此店仅供测试，不代表真实经营情况。'
+          : restaurant.source === 'LEGACY_IMPORT'
+            ? '历史导入 · 原版候选信息尚未核实。'
+            : '用户提供的餐厅资料。'
+      }}
+      营业、地址及消费请出发前核实。
     </p>
     <section class="detail-heading">
       <div>
@@ -66,15 +116,16 @@ function shareRestaurant(): void {
           {{ restaurant.category }}<span>·</span>{{ priceLabel(restaurant) }} / 人 <span>·</span
           >{{ distance === null ? '位置待补充' : `距清水河校区 ${distance.toFixed(1)} km` }}
         </p>
-        <p v-if="restaurant.closed" class="closed-note">原版标注为已停业，当前状态待核实。</p>
+        <p v-if="restaurant.closed" class="closed-note">此店标注为已停业，当前状态请出发前核实。</p>
         <p v-if="restaurant.priceKind === 'estimate'" class="price-note">
-          人均由旧消费档位换算，仅为估值。
+          人均仅为估值，请以实际消费为准。
         </p>
       </div>
       <div class="detail-cup">
         <CupBadge :tier="tierOf(restaurant.score)" /><small>等待真实的第一口</small>
       </div>
     </section>
+    <RestaurantManagementActions :id="restaurant.id" :key="restaurant.id" />
     <div class="detail-layout">
       <div class="detail-main">
         <section class="detail-panel" aria-labelledby="score-title">
@@ -118,7 +169,7 @@ function shareRestaurant(): void {
           <div class="review-empty">
             <CupBadge tier="none" />
             <h3>好味道，等真实的故事。</h3>
-            <p>当前为只读目录预览，暂不支持发布评价或上传照片。</p>
+            <p>暂不支持发布评价或上传照片。</p>
             <RouterLink to="/scoring-guide">先了解如何认真评价 →</RouterLink>
           </div>
         </section>
@@ -145,7 +196,15 @@ function shareRestaurant(): void {
           <div class="detail-tags">
             <span v-for="tag in restaurant.tags" :key="tag">{{ tag }}</span>
           </div>
-          <p>标签来自原版目录，仅供预览参考。</p>
+          <p>
+            {{
+              demo
+                ? '带“联调模拟”标签的资料仅供测试。'
+                : restaurant.source === 'LEGACY_IMPORT'
+                  ? '标签来自历史导入资料，仅供参考。'
+                  : '标签由餐厅资料提供者填写。'
+            }}
+          </p>
         </section>
         <button class="share-button" type="button" @click="shareRestaurant">分享这家店 ↗</button>
         <p v-if="copyFeedback" class="copy-feedback" role="status">{{ copyFeedback }}</p>
@@ -163,7 +222,7 @@ function shareRestaurant(): void {
   <section v-else class="missing-restaurant" aria-labelledby="missing-title">
     <CupBadge tier="none" />
     <h1 id="missing-title">没有找到这家店。</h1>
-    <p>这个链接不在当前候选目录中，回去看看其他好味道吧。</p>
+    <p>餐厅可能已删除或链接有误，回去看看其他好味道吧。</p>
     <RouterLink class="primary-action" to="/">返回餐厅目录</RouterLink>
   </section>
 </template>

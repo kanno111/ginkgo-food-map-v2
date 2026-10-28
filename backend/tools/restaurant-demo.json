@@ -1,0 +1,329 @@
+{
+  "description": "本地联调模拟夹具，沿用原版25家候选名称与地址；未核实经营与消费。价格仅为档位估值，坐标未知，不创建评价或归属。原始快照来源见frontend/src/modules/restaurant/model/catalog.preview.ts。",
+  "restaurants": [
+    {
+      "name": "银桦餐厅",
+      "categoryCode": "CANTEEN",
+      "pricePerPerson": 15,
+      "address": "电子科技大学清水河校区内",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "食堂",
+        "人均 10 元",
+        "量大",
+        "赶课首选"
+      ]
+    },
+    {
+      "name": "朝阳餐厅",
+      "categoryCode": "CANTEEN",
+      "pricePerPerson": 15,
+      "address": "西源大道 2006 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "食堂",
+        "冒菜窗口",
+        "牛肉面"
+      ]
+    },
+    {
+      "name": "紫荆餐厅",
+      "categoryCode": "CANTEEN",
+      "pricePerPerson": 15,
+      "address": "天润路 硕丰二组团",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "食堂",
+        "饺子",
+        "空调足"
+      ]
+    },
+    {
+      "name": "西北餐厅",
+      "categoryCode": "CANTEEN",
+      "pricePerPerson": 15,
+      "address": "西源大道 2006 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "食堂",
+        "面食",
+        "肉夹馍"
+      ]
+    },
+    {
+      "name": "顽石餐饮(科创餐厅)",
+      "categoryCode": "FAST_FOOD",
+      "pricePerPerson": 25,
+      "address": "西源大道 2006 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "快餐",
+        "套餐",
+        "环境干净"
+      ]
+    },
+    {
+      "name": "肯德基(电子科大店)",
+      "categoryCode": "FAST_FOOD",
+      "pricePerPerson": 65,
+      "address": "朝阳餐厅二楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "炸鸡",
+        "Wi-Fi",
+        "深夜营业"
+      ]
+    },
+    {
+      "name": "麦当劳(学子食堂店)",
+      "categoryCode": "FAST_FOOD",
+      "pricePerPerson": 25,
+      "address": "电子科技大学商业街",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "汉堡",
+        "24 小时",
+        "随心配"
+      ]
+    },
+    {
+      "name": "三米粥铺(龙湖时代天街)",
+      "categoryCode": "PORRIDGE_NOODLE",
+      "pricePerPerson": 25,
+      "address": "合作路 89 号 23 栋附 162",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "粥",
+        "生煎",
+        "养胃"
+      ]
+    },
+    {
+      "name": "沙县小吃(时代天街)",
+      "categoryCode": "SNACK",
+      "pricePerPerson": 15,
+      "address": "清水河校区西门西南 280 米",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "拌面",
+        "蒸饺",
+        "快捷"
+      ]
+    },
+    {
+      "name": "兰州牛肉面(科大店)",
+      "categoryCode": "NOODLE",
+      "pricePerPerson": 25,
+      "address": "天润路 495 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "牛肉面",
+        "现拉",
+        "辣椒油"
+      ]
+    },
+    {
+      "name": "钟水饺(建设路店)",
+      "categoryCode": "SNACK",
+      "pricePerPerson": 25,
+      "address": "建设路 53 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "红油水饺",
+        "老字号",
+        "必吃"
+      ]
+    },
+    {
+      "name": "宫廷糕点铺(建设路店)",
+      "categoryCode": "DESSERT",
+      "pricePerPerson": 15,
+      "address": "建设路 47 号附 1-5",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "蛋挞",
+        "桃酥",
+        "现烤"
+      ]
+    },
+    {
+      "name": "鄢知味冒菜",
+      "categoryCode": "MAO_CAI",
+      "pricePerPerson": 25,
+      "address": "建设路 43 号二区",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "冒菜",
+        "可调辣度",
+        "牛肉嫩"
+      ]
+    },
+    {
+      "name": "甜水面·成都名小吃集合店",
+      "categoryCode": "SNACK",
+      "pricePerPerson": 25,
+      "address": "建设中路 15 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "甜水面",
+        "抄手",
+        "分量小"
+      ]
+    },
+    {
+      "name": "回水镇·江湖川菜",
+      "categoryCode": "SICHUAN",
+      "pricePerPerson": 65,
+      "address": "建设路 53 号附 13",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "川菜",
+        "聚餐",
+        "跳水鱼"
+      ]
+    },
+    {
+      "name": "刘文祥麻辣烫",
+      "categoryCode": "MALA_TANG",
+      "pricePerPerson": 25,
+      "address": "建设路 26 号附 2",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "麻辣烫",
+        "干拌",
+        "自选"
+      ]
+    },
+    {
+      "name": "蜀大侠火锅(总府路总店)",
+      "categoryCode": "HOT_POT",
+      "pricePerPerson": 65,
+      "address": "商业场街 1 号 2 楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "火锅",
+        "毛肚",
+        "排队"
+      ]
+    },
+    {
+      "name": "小龙坎火锅(全球总店)",
+      "categoryCode": "HOT_POT",
+      "pricePerPerson": 120,
+      "address": "下东大街段 188 号时代华章 2 楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "火锅",
+        "牛油锅",
+        "偏贵"
+      ]
+    },
+    {
+      "name": "喜福老火锅(春熙太古里店)",
+      "categoryCode": "HOT_POT",
+      "pricePerPerson": 120,
+      "address": "总府路 1 号 4 楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "火锅",
+        "服务好",
+        "酥肉"
+      ]
+    },
+    {
+      "name": "三圣巷老火锅(太古里店)",
+      "categoryCode": "HOT_POT",
+      "pricePerPerson": 65,
+      "address": "正科甲巷 76 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "火锅",
+        "巷子老店",
+        "现炒锅底"
+      ]
+    },
+    {
+      "name": "陶源小味川菜",
+      "categoryCode": "SICHUAN",
+      "pricePerPerson": 65,
+      "address": "一环路南三段 11-12 号",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "川菜",
+        "豆瓣鱼",
+        "家常味"
+      ]
+    },
+    {
+      "name": "岗火自贡·尖货爆炒(玉林店)",
+      "categoryCode": "SICHUAN",
+      "pricePerPerson": 65,
+      "address": "玉林东路 1 号附 6",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "自贡菜",
+        "鲜锅兔",
+        "重口"
+      ]
+    },
+    {
+      "name": "学一美食城(三楼)",
+      "categoryCode": "FAST_FOOD",
+      "pricePerPerson": 25,
+      "address": "电子科技大学清水河校区 学一食堂三楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "加热柜",
+        "凉菜"
+      ]
+    },
+    {
+      "name": "火焰山烤肉饭(商业街店)",
+      "categoryCode": "FAST_FOOD",
+      "pricePerPerson": 25,
+      "address": "电子科技大学商业街 12 号",
+      "businessStatus": "CLOSED",
+      "tags": [
+        "联调模拟",
+        "烤肉饭",
+        "已停业"
+      ]
+    },
+    {
+      "name": "鲜果时光轻食",
+      "categoryCode": "LIGHT_MEAL",
+      "pricePerPerson": 65,
+      "address": "西源大道 2006 号 学生活动中心 1 楼",
+      "businessStatus": "OPERATING",
+      "tags": [
+        "联调模拟",
+        "沙拉",
+        "轻食",
+        "贵"
+      ]
+    }
+  ]
+}

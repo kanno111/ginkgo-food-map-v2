@@ -2,9 +2,15 @@ import { createApp, h } from 'vue'
 import type { App } from 'vue'
 import { createPinia, disposePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CupBadge, cupTiers } from '@/modules/restaurant'
 import HomePage from './HomePage.vue'
+
+// 视觉契约不依赖网络；餐厅HTTP行为由独立接入测试覆盖。
+vi.mock('@/modules/restaurant/api/restaurantApi', () => ({
+  fetchRestaurantCategories: vi.fn().mockResolvedValue([]),
+  fetchRestaurants: vi.fn().mockResolvedValue({ records: [], total: 0, totalPages: 0 }),
+}))
 
 // 原版素材与文案是用户明确要求保留的产品约束，用固定基准防止后续设计再次替换。
 describe('original Ginkgo brand parity', () => {

@@ -56,6 +56,9 @@ public class SecurityConfiguration {
                 .httpBasic(basic -> basic.disable()).formLogin(form -> form.disable()).logout(logout -> logout.disable())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/api/public/**").permitAll()
+                        // 只允许餐厅阅读的三个GET入口；不放开后续写入、管理或嵌套资源。
+                        .requestMatchers(HttpMethod.GET, "/api/restaurant-categories", "/api/restaurants",
+                                "/api/restaurants/{id}").permitAll()
                         // 只公开明确列出的认证 POST 接口，不放开整个 /auth 路径。
                         .requestMatchers(
                                 HttpMethod.POST,

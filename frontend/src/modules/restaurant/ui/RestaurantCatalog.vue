@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef } from 'vue'
 import { useRestaurantCatalog } from '../model/catalog.store'
 import { cupTiers } from '../model/catalog.logic'
 import CupBadge from './CupBadge.vue'
 import RestaurantCard from './RestaurantCard.vue'
 
 const catalog = useRestaurantCatalog()
+onMounted(() => {
+  void catalog.load()
+})
+onUnmounted(catalog.cancelPending)
 // 折叠只改变展示，不清除条件；筛选与页码仍由目录状态保留。
 const filtersExpanded = ref(false)
 const advancedCount = computed(
@@ -31,11 +35,14 @@ async function changePage(page: number): Promise<void> {
       <div>
         <h2 id="directory-title">餐厅目录</h2>
       </div>
-      <RouterLink class="guide-link" to="/scoring-guide">杯型评分说明 →</RouterLink>
+      <div class="directory-links">
+        <RouterLink class="guide-link" to="/restaurants/new">＋ 新增餐厅</RouterLink>
+        <RouterLink class="guide-link" to="/scoring-guide">杯型评分说明 →</RouterLink>
+      </div>
     </div>
     <div class="preview-notice" role="note">
-      <span class="preview-label">目录预览</span>
-      <p>以下为原版 25 家候选店铺，仅供界面预览。营业、地址及人均尚未核实，暂无真实评价。</p>
+      <span class="preview-label">餐厅目录</span>
+      <p>营业、地址及消费请出发前核实。带“联调模拟”标签的店铺仅供测试，不代表真实经营情况。</p>
     </div>
     <div class="directory-layout">
       <aside class="directory-filters" aria-label="餐厅筛选">
@@ -78,12 +85,12 @@ async function changePage(page: number): Promise<void> {
             </button>
             <button
               v-for="category in catalog.categories"
-              :key="category"
+              :key="category.code"
               type="button"
-              :aria-pressed="catalog.filters.category === category"
-              @click="catalog.filters.category = category"
+              :aria-pressed="catalog.filters.category === category.code"
+              @click="catalog.filters.category = category.code"
             >
-              {{ category }}
+              {{ category.name }}
             </button>
           </fieldset>
           <label class="field-label" for="restaurant-view">只看这些</label>
@@ -93,10 +100,7 @@ async function changePage(page: number): Promise<void> {
             <option value="pitfall">踩雷 · 小杯</option>
           </select>
           <label class="closed-filter"
-            ><input
-              v-model="catalog.filters.hideClosed"
-              type="checkbox"
-            />隐藏原版标注停业的店</label
+            ><input v-model="catalog.filters.hideClosed" type="checkbox" />隐藏标注停业的店</label
           >
         </div>
       </aside>
@@ -122,9 +126,8 @@ async function changePage(page: number): Promise<void> {
         </div>
         <div ref="resultsHeading" class="results-toolbar" tabindex="-1" aria-label="餐厅筛选结果">
           <p role="status" aria-live="polite">
-            找到 <strong>{{ catalog.results.length }}</strong> 家候选店铺<span
-              v-if="catalog.results.length"
-            >
+            {{ catalog.loading ? '正在加载 · ' : '' }}找到
+            <strong>{{ catalog.total }}</strong> 家餐厅<span v-if="catalog.total">
               · 第 {{ catalog.page }} / {{ catalog.pages }} 页</span
             >
           </p>
@@ -142,13 +145,23 @@ async function changePage(page: number): Promise<void> {
             </select>
           </div>
         </div>
-        <div v-if="catalog.results.length" class="restaurant-grid">
+        <div v-if="catalog.error" class="directory-empty" role="alert">
+          <h3>餐厅目录暂时无法加载。</h3>
+          <p>{{ catalog.error }}</p>
+          <button type="button" class="primary-action" @click="catalog.load">重新加载</button>
+        </div>
+        <div
+          v-else-if="catalog.visibleRestaurants.length"
+          class="restaurant-grid"
+          :aria-busy="catalog.loading"
+        >
           <RestaurantCard
             v-for="restaurant in catalog.visibleRestaurants"
             :key="restaurant.id"
             :restaurant="restaurant"
           />
         </div>
+        <div v-else-if="catalog.loading" class="directory-empty" role="status">正在加载餐厅…</div>
         <div v-else class="directory-empty" role="status">
           <CupBadge tier="none" />
           <h3>换个条件，也许就遇见了。</h3>
@@ -158,34 +171,39 @@ async function changePage(page: number): Promise<void> {
               catalog.filters.tiers.some((tier) => tier !== 'none')
             "
           >
-            候选目录暂无真实评价，所有店铺均为待评级。试试“全部杯型”或其他关键词。
+            当前条件下没有已评级的餐厅。没有评价的店铺为待评级，试试“全部杯型”或其他关键词。
           </p>
-          <p v-else>没有找到符合条件的候选店铺，试试店名、地址或不同分类。</p>
+          <p v-else>没有找到符合条件的餐厅，试试店名、地址或不同分类。</p>
           <button type="button" class="primary-action" @click="catalog.resetFilters">
             清除筛选
           </button>
         </div>
-        <nav v-if="catalog.pages > 1" class="catalog-pagination" aria-label="餐厅分页">
+        <nav
+          v-if="!catalog.error && catalog.pages > 1"
+          class="catalog-pagination"
+          aria-label="餐厅分页"
+        >
           <button
             type="button"
-            :disabled="catalog.page === 1"
+            :disabled="catalog.loading || catalog.page === 1"
             @click="changePage(catalog.page - 1)"
           >
             ← 上一页
           </button>
           <button
-            v-for="page in catalog.pages"
+            v-for="page in catalog.pageNumbers"
             :key="page"
             type="button"
             :aria-current="catalog.page === page ? 'page' : undefined"
             :aria-label="`第 ${page} 页`"
+            :disabled="catalog.loading"
             @click="changePage(page)"
           >
             {{ page }}
           </button>
           <button
             type="button"
-            :disabled="catalog.page === catalog.pages"
+            :disabled="catalog.loading || catalog.page === catalog.pages"
             @click="changePage(catalog.page + 1)"
           >
             下一页 →
@@ -202,10 +220,16 @@ async function changePage(page: number): Promise<void> {
 }
 .directory-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-end;
   gap: 20px;
   margin-bottom: 14px;
+}
+.directory-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
 }
 h2 {
   margin: 0;

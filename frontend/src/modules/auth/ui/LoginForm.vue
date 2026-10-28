@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useLoginStore } from '../model/login.store'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useLoginStore()
 const form = reactive({ username: '', password: '' })
 const validation = ref<string | null>(null)
@@ -19,7 +20,13 @@ async function handleSubmit() {
   }
   const success = await auth.submit({ username: form.username.trim(), password: form.password })
   form.password = ''
-  if (success) await router.replace('/')
+  if (success) {
+    // 仅允许本站餐厅路由回跳，不能把外部URL、协议相对地址或其他查询当作跳转目标。
+    const target = route.query.redirect
+    const safeTarget =
+      typeof target === 'string' && /^\/restaurants\/(?:new|[1-9]\d*(?:\/edit)?)$/.test(target)
+    await router.replace(safeTarget ? target : '/')
+  }
 }
 
 onBeforeUnmount(() => {

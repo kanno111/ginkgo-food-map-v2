@@ -22,7 +22,7 @@ const distance = computed(() => campusDistance(props.restaurant))
     <div class="card-meta">
       <span class="card-price"
         >{{ priceLabel(restaurant)
-        }}<small v-if="restaurant.priceKind === 'estimate'"> / 人 · 档位估值</small></span
+        }}<small v-if="restaurant.priceKind === 'estimate'"> / 人 · 估值</small></span
       >
       <span>{{ distance === null ? '位置待补' : `距校区 ${distance.toFixed(1)} km` }}</span>
     </div>
@@ -30,7 +30,7 @@ const distance = computed(() => campusDistance(props.restaurant))
       <span>{{
         restaurant.reviewCount ? `${restaurant.reviewCount} 条评价` : '等待第一条真实评价'
       }}</span>
-      <span v-if="restaurant.closed" class="closed-label">原版标注停业</span>
+      <span v-if="restaurant.closed" class="closed-label">标注停业</span>
       <span v-else>查看详情 <span aria-hidden="true">→</span></span>
     </div>
   </RouterLink>

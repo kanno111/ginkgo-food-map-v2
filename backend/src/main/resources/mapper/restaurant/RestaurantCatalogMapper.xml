@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper">
+    <!-- 显式列白名单不加载创建者和删除信息；所有坐标均为GCJ-02，参考点沿用原页面。 -->
+    <sql id="publicColumns">
+        r.id, r.name, r.category_code, c.name AS category_name, r.price_per_person, r.price_kind,
+        r.address, r.latitude, r.longitude, r.coordinate_system, r.needs_location,
+        r.business_status, r.source_type, r.created_at, r.updated_at,
+        CASE WHEN r.needs_location = 0 AND r.latitude IS NOT NULL AND r.longitude IS NOT NULL
+            THEN 6371 * 2 * ASIN(SQRT(LEAST(1.0, GREATEST(0.0,
+                POWER(SIN(RADIANS(r.latitude - 30.7544) / 2), 2)
+                + COS(RADIANS(30.7544)) * COS(RADIANS(r.latitude))
+                * POWER(SIN(RADIANS(r.longitude - 103.9312) / 2), 2)))))
+            ELSE NULL END AS distance_km
+    </sql>
+
+    <!-- COUNT和分页复用同一可见集合；EXISTS使同店多个命中标签仍只算一家店。 -->
+    <sql id="visibleConditions">
+        WHERE r.deleted_at IS NULL
+        <if test="query.category != ''">AND r.category_code = #{query.category}</if>
+        <if test="query.hideClosed">AND r.business_status = 'OPERATING'</if>
+        <if test="query.excludesUnrated">AND 1 = 0</if>
+        <if test="query.keyword.strip() != ''">
+            AND (r.name LIKE #{query.keywordPattern} ESCAPE '!'
+                OR r.address LIKE #{query.keywordPattern} ESCAPE '!'
+                OR c.name LIKE #{query.keywordPattern} ESCAPE '!'
+                OR EXISTS (SELECT 1 FROM restaurant_tags t WHERE t.restaurant_id = r.id
+                    AND t.tag LIKE #{query.keywordPattern} ESCAPE '!'))
+        </if>
+    </sql>
+
+    <select id="selectCategories" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantCategoryEntity">
+        SELECT code, name, sort_order, enabled FROM restaurant_categories ORDER BY sort_order, code
+    </select>
+
+    <select id="selectVisibleById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantEntity">
+        SELECT <include refid="publicColumns"/>
+        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        WHERE r.id = #{id} AND r.deleted_at IS NULL
+    </select>
+
+    <select id="countVisible" resultType="long">
+        SELECT COUNT(*) FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        <include refid="visibleConditions"/>
+    </select>
+
+    <select id="selectVisiblePage" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantEntity">
+        SELECT <include refid="publicColumns"/>
+        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        <include refid="visibleConditions"/>
+        <!-- 不使用客户端SQL片段。M1所有评分及评价数相同，相关排序退化为名称和ID。 -->
+        ORDER BY
+        <choose>
+            <when test="query.sort == 'price'">r.price_per_person IS NULL, r.price_per_person,</when>
+            <when test="query.sort == 'distance'">distance_km IS NULL, distance_km,</when>
+        </choose>
+        r.name, r.id
+        LIMIT #{query.pageSize} OFFSET #{query.offset}
+    </select>
+
+    <select id="selectVisibleTags" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantTagEntity">
+        SELECT t.restaurant_id, t.tag, t.position
+        FROM restaurant_tags t JOIN restaurants r ON r.id = t.restaurant_id
+        WHERE r.deleted_at IS NULL AND t.restaurant_id IN
+        <foreach collection="ids" item="id" open="(" close=")" separator=",">#{id}</foreach>
+        ORDER BY t.restaurant_id, t.position
+    </select>
+</mapper>

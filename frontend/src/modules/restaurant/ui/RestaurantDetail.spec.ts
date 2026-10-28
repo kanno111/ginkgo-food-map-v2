@@ -1,18 +1,30 @@
-import { createApp, nextTick } from 'vue'
+import { AxiosError, AxiosHeaders } from 'axios'
+import { createApp, h, nextTick, ref } from 'vue'
 import type { App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fetchRestaurant } from '../api/restaurantApi'
+import { restaurantFixture } from '../api/restaurant.test-data'
 import RestaurantDetail from './RestaurantDetail.vue'
 
-/** 验证直达详情、缺失页面和剪贴板降级，不将旧目录解释为真实已营业数据。 */
-describe('restaurant detail preview', () => {
+vi.mock('../api/restaurantApi', () => ({ fetchRestaurant: vi.fn() }))
+
+/** 直达链接独立请求；只有404展示缺失页，故障可重试，剪贴板仍保留降级。 */
+describe('restaurant detail API integration', () => {
   let app: App | undefined
   let host: HTMLDivElement
+  const currentId = ref(restaurantFixture.id)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: ['/', '/scoring-guide'].map((path) => ({ path, component: { template: '<div />' } })),
   })
+  const settle = async () => {
+    for (let i = 0; i < 6; i++) await nextTick()
+  }
   beforeEach(async () => {
+    vi.resetAllMocks()
+    vi.mocked(fetchRestaurant).mockResolvedValue(restaurantFixture)
+    currentId.value = restaurantFixture.id
     await router.push('/')
     host = document.createElement('div')
     document.body.append(host)
@@ -23,36 +35,71 @@ describe('restaurant detail preview', () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
-  function mount(id: string) {
-    app = createApp(RestaurantDetail, { id }).use(router)
+  async function mount() {
+    app = createApp({ render: () => h(RestaurantDetail, { id: currentId.value }) }).use(router)
     app.mount(host)
+    await settle()
   }
 
-  it('shows the original candidate with explicit unrated and estimated values', () => {
-    mount('r01')
-    expect(host.querySelector('h1')?.textContent).toBe('银桦餐厅')
-    expect(host.querySelector('.detail-preview')?.textContent).toContain('尚未核实')
+  it('loads the direct ID and preserves unknown values and demo labels', async () => {
+    await mount()
+    expect(fetchRestaurant).toHaveBeenCalledWith(restaurantFixture.id, expect.any(AbortSignal))
+    expect(host.querySelector('h1')?.textContent).toBe(restaurantFixture.name)
+    expect(host.querySelector('.detail-preview')?.textContent).toContain('联调模拟')
     expect(host.querySelector('.detail-cup')?.textContent).toContain('待评级')
     expect(host.querySelector('.score-summary')?.textContent).toContain('—')
-    expect(host.querySelector('.price-note')?.textContent).toContain('仅为估值')
-    expect(host.querySelector('.review-empty')?.textContent).toContain('暂不支持发布评价')
+    expect(host.querySelector('.detail-subtitle')?.textContent).toContain('人均待补')
+    expect(host.querySelector('.distance-note')?.textContent).toContain('位置尚未确认')
   })
 
-  it('offers a useful fallback for a missing direct restaurant link', () => {
-    mount('unknown')
+  it('distinguishes a missing record from a temporary server failure', async () => {
+    const headers = new AxiosHeaders()
+    vi.mocked(fetchRestaurant).mockRejectedValueOnce(
+      new AxiosError('missing', '', undefined, undefined, {
+        status: 404,
+        statusText: '',
+        data: {},
+        headers,
+        config: { headers },
+      }),
+    )
+    await mount()
     expect(host.querySelector('h1')?.textContent).toBe('没有找到这家店。')
-    expect(host.querySelector('.primary-action')?.getAttribute('href')).toBe('/')
+    vi.mocked(fetchRestaurant).mockRejectedValueOnce(new Error('服务暂不可用'))
+    currentId.value = '2'
+    await settle()
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('服务暂不可用')
+    host.querySelector<HTMLButtonElement>('[role="alert"] button')!.click()
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe(restaurantFixture.name)
   })
 
-  it('provides manual copy text when clipboard access fails', async () => {
+  it('offers manual copy when clipboard fails and shares the database ID', async () => {
     vi.stubGlobal('navigator', {
       clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
-    mount('r01')
-    host.querySelector<HTMLButtonElement>('.address-panel button')!.click()
-    await nextTick()
-    await nextTick()
+    await mount()
+    host.querySelector<HTMLButtonElement>('.share-button')!.click()
+    await settle()
     expect(host.querySelector('.copy-feedback')?.textContent).toContain('手动复制')
-    expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toContain('清水河校区')
+    const text = host.querySelector<HTMLTextAreaElement>('textarea')?.value
+    expect(text).toContain(`/restaurants/${restaurantFixture.id}`)
+    expect(text).toContain('联调模拟数据')
+  })
+
+  it('ignores the previous restaurant response after switching routes', async () => {
+    let resolveOld!: (value: typeof restaurantFixture) => void
+    vi.mocked(fetchRestaurant).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOld = resolve
+      }),
+    )
+    await mount()
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('正在加载')
+    currentId.value = '2'
+    await settle()
+    resolveOld({ ...restaurantFixture, name: '过期响应' })
+    await settle()
+    expect(host.querySelector('h1')?.textContent).toBe(restaurantFixture.name)
   })
 })

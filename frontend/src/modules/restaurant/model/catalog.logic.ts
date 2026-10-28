@@ -52,6 +52,7 @@ export function tierOf(score: number | null): CupTier {
 
 /** 参考点为清水河校区，计算直线公里数；位置未确认时不显示虚构距离。 */
 export function campusDistance(restaurant: RestaurantReadModel): number | null {
+  if (restaurant.distanceKm !== undefined) return restaurant.distanceKm
   const { latitude, longitude } = restaurant
   if (
     restaurant.needsLocation ||

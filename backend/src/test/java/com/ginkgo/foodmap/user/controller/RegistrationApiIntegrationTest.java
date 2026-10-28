@@ -55,7 +55,7 @@ class RegistrationApiIntegrationTest {
 
     private static final String RUN_ID = UUID.randomUUID().toString().replace("-", "");
     private static final String DATABASE = "ginkgo_auth_it_" + RUN_ID;
-    private static final String MYSQL_SERVER = "jdbc:mysql://127.0.0.1:3306/";
+    private static final String MYSQL_SERVER = mysqlServer();
     private static final String REDIS_PREFIX = "test:auth:registration:{verification-code}:" + RUN_ID;
     private static boolean databaseCreated;
 
@@ -430,5 +430,14 @@ class RegistrationApiIntegrationTest {
             throw new IllegalStateException("AUTH_TEST_DB_PASSWORD is required for MySQL integration tests");
         }
         return password;
+    }
+
+    /** 完整联调可使用独立回环MySQL实例；不允许URL携带库名、凭据或任意远程参数。 */
+    private static String mysqlServer() {
+        String server = System.getenv().getOrDefault("AUTH_TEST_DB_SERVER", "jdbc:mysql://127.0.0.1:3306/");
+        if (!server.matches("jdbc:mysql://(?:127\\.0\\.0\\.1|localhost):[1-9][0-9]{0,4}/")) {
+            throw new IllegalStateException("AUTH_TEST_DB_SERVER must be an explicit loopback MySQL server URL");
+        }
+        return server;
     }
 }

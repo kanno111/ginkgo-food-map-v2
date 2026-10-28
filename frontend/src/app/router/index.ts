@@ -4,6 +4,19 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/restaurants/new',
+      name: 'restaurant-create',
+      component: () => import('@/pages/restaurant/RestaurantEditorPage.vue'),
+      meta: { title: '新增餐厅' },
+    },
+    {
+      path: '/restaurants/:id/edit',
+      name: 'restaurant-edit',
+      component: () => import('@/pages/restaurant/RestaurantEditorPage.vue'),
+      props: true,
+      meta: { title: '编辑餐厅' },
+    },
+    {
       path: '/restaurants/:id',
       name: 'restaurant-detail',
       component: () => import('@/pages/restaurant/RestaurantPage.vue'),

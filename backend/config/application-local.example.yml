@@ -25,6 +25,9 @@ spring:
     # 必须填写该发信地址单独设置的 SMTP 密码，不是阿里云登录密码或 AccessKey。
     password: replace-with-smtp-password
     properties:
+      # 本地开发固定 EHLO/HELO 客户端名称，避免自动反向 DNS 查询拖慢握手。
+      # 这是客户端身份，不是 SMTP 服务地址；生产环境应另配适合自身的客户端名称。
+      "[mail.smtp.localhost]": ginkgo-food-map.local
       "[mail.smtp.auth]": true
       "[mail.smtp.starttls.enable]": true
       "[mail.smtp.starttls.required]": true

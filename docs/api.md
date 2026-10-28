@@ -13,7 +13,7 @@
 | 后端直连地址 | `http://localhost:8080`，端口可通过 `SERVER_PORT` 覆盖 |
 | 前端开发地址 | `http://localhost:5173`，Vite 代理 `/auth` 和 `/api` 请求 |
 | 生产访问 | `http://8.137.98.235`，Nginx 原样代理 `/auth/` 和 `/api/`；首次成功发布前返回503 |
-| 路径前缀 | 没有统一 `/api` 前缀；认证使用 `/auth`，公开状态使用 `/api/public` |
+| 路径前缀 | 认证使用 `/auth`，公开状态使用 `/api/public`，餐厅读取使用 `/api/restaurants` 和 `/api/restaurant-categories` |
 | 请求体 | 有请求体的业务 POST 使用 `Content-Type: application/json` |
 | 响应体 | 业务响应为 JSON；健康检查有独立格式，见第8节 |
 | 日期时间 | ISO 8601 UTC 字符串，例如 `2026-10-27T12:00:00Z` |
@@ -103,6 +103,14 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 | GET | `/auth/me` | Bearer | 200 | 查询当前用户 |
 | POST | `/auth/logout` | Bearer | 200 | 退出当前会话 |
 | GET | `/api/public/status` | 公开 | 200 | 应用标识与架构信息 |
+| GET | `/api/restaurant-categories` | 公开 | 200 | 餐厅分类字典（含停用状态） |
+| GET | `/api/restaurants` | 公开 | 200 | 全局搜索筛选、排序和服务端分页 |
+| GET | `/api/restaurants/{id}` | 公开 | 200 | 未删除餐厅详情 |
+| GET | `/api/restaurants/{id}/management` | Bearer，创建者或管理员 | 200 | 管理资料；删除记录仅管理员可读 |
+| POST | `/api/restaurants` | Bearer | 201 | 新建餐厅，当前账号作为创建者 |
+| PUT | `/api/restaurants/{id}` | Bearer，创建者或管理员 | 200 | 完整替换可编辑资料与标签 |
+| DELETE | `/api/restaurants/{id}` | Bearer，创建者或管理员 | 200 | 软删除，保留历史标签，无需版本 |
+| POST | `/api/restaurants/{id}/restore` | Bearer，管理员 | 200 | 恢复已删除餐厅，无需版本 |
 | GET | `/actuator/health` | 公开 | 200 / 503 | 基础设施健康检查 |
 
 ## 3. 邮箱验证码
@@ -405,6 +413,8 @@ Accept: application/json
 
 健康状态为 `DOWN` 或 `OUT_OF_SERVICE` 时通常返回 HTTP 503；当前配置隐藏组件细节。它与“HTTP应用仍能响应”是两个不同概念，状态取决于实际启用的健康组件及其连接情况。
 
+当前邮件组件的健康检查连接 SMTP 并校验 TLS/账号认证，不发送验证码、不消耗验证码配额，也不证明收件箱投递成功。SMTP 网络故障可使本接口变慢或返回503，公开状态/餐厅查询仍可能正常；配置中的连接、读取、写入超时不是整个健康请求的统一总时限，本机名称解析等耗时需单独排查。不要将邮件健康检查通过当成真实邮件验收通过。
+
 当前 Vite 和生产 Nginx未代理 `/actuator/`，应直连后端或使用部署环境单独配置的探针地址。生产 Nginx另有 `GET /nginx-health`，返回 `200`、`text/plain` 的 `ok` 加换行，仅检查Nginx本身；它不是后端接口，也不检查后端或数据库。Actuator还暴露 `/actuator/info`，但它不在匿名白名单中，需通过Bearer认证，使用Actuator原生格式，默认可能为空对象。
 
 ### 8.3 部署版本标识
@@ -444,6 +454,12 @@ Accept: application/json
 | 503 | `AUTH_SERVICE_UNAVAILABLE` | 登录、身份验证或会话服务暂不可用 |
 | 401 | `AUTH_UNAUTHENTICATED` | 安全过滤器拒绝缺失或失效身份 |
 | 403 | `AUTH_FORBIDDEN` | 没有执行操作的权限 |
+| 400 | `RESTAURANT_INVALID_ID` | 餐厅ID不是Java Long范围内的规范正整数 |
+| 404 | `RESTAURANT_NOT_FOUND` | 餐厅不存在或已删除，统一提示 |
+| 400 | `RESTAURANT_INVALID_INPUT` | 餐厅文字长度、价格组合、坐标精度或标签总长不符合规则 |
+| 400 | `RESTAURANT_CATEGORY_UNAVAILABLE` | 分类不存在或新分配的分类已停用 |
+| 403 | `RESTAURANT_FORBIDDEN` | 非创建者尝试管理他人餐厅或历史未知归属餐厅 |
+| 409 | `RESTAURANT_STATE_CONFLICT` | 对已删除餐厅编辑/再删，或对未删除餐厅恢复 |
 
 当前限流错误不提供剩余次数、精确解锁时间或 `Retry-After`，客户端不要假设这些字段或标头存在。
 
@@ -477,11 +493,259 @@ $loginResult = $null
 
 示例只输出公开用户信息和退出结果，不打印令牌或密码。调用失败时依据实际HTTP状态和响应错误码处理，不要把失败请求当成成功继续执行。
 
-## 11. 尚未实现与维护要求
+## 11. 餐厅公开只读接口
 
-尚未提供刷新令牌、列出设备、退出其他会话、餐厅和评价等业务接口。密码重置提交接口及前端找回密码页面已合并发布，基础认证验收已由用户确认通过。不要将计划中的路径作为现有API调用。
+本节描述本仓库已实现的接口，线上是否可调用需核对实际部署版本。前端已接入本节接口。V3仅初始化13类字典，没有自动导入餐厅或评价；空库返回空目录。本地25家联调模拟店由开发工具显式写入，见第13节。
 
-当前功能分支的 `/restaurants/:id`、`/scoring-guide` 是客户端页面路由，不是后端业务API。餐厅前端目前只读原版候选预览数据，不调用或模拟不存在的餐厅接口；列表筛选和分页仅在预览集合内执行，后续真实接口协议仍需独立实现和更新本文。
+三个公开读取接口均无需登录、无角色要求、无业务写入副作用，不创建会话或发送邮件。调用方应省略 `Authorization`；主动携带无效或过期Bearer仍返回401。只放行这三个GET入口，已实现的写入和管理接口见第12节，仍必须认证及服务端授权。
+
+### 11.1 分类字典
+
+`GET /api/restaurant-categories`，无查询参数，成功200。`data`为按 `sortOrder`、`code` 排序的数组，下例仅展示一项：
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "message": "请求成功",
+  "data": [{ "code": "HOT_POT", "name": "火锅", "sortOrder": 1, "enabled": true }],
+  "timestamp": "2026-10-28T06:00:00Z"
+}
+```
+
+迁移初始化13类。接口包含停用分类，供已有餐厅展示和筛选；`enabled=false`不能被理解为允许后续新建使用该分类。分类管理接口尚未实现。
+
+### 11.2 餐厅列表
+
+`GET /api/restaurants`，成功200，查询参数如下。未提供字段使用默认值，非法类型、范围和编码返回400 `COMMON_VALIDATION_FAILED`，`data`含字段错误；未知查询字段不参与筛选。
+
+| 参数 | 类型 | 默认值 | 规则 |
+| --- | --- | --- | --- |
+| `keyword` | string | 空字符串 | 最多100个Java字符串字符；去首尾空白；搜索名称、地址、分类展示名和标签。百分号、下划线、感叹号、反斜杠按字面量搜索，非通配符 |
+| `category` | string | 空字符串 | 精确分类编码，1–32位大写字母/数字/下划线且以字母开头；空值不限分类。合法但不存在的编码返回空集合 |
+| `tiers` | string array | 空数组 | `bucket`、`super`、`large`、`medium`、`small`、`none`；最多6项，组合为并集。重复参数或逗号分隔均可，例如 `tiers=none&tiers=small` |
+| `view` | string | `all` | `all`、`recommended`、`pitfall`，与其他筛选取交集 |
+| `sort` | string | `score` | `score`、`taste`、`value`、`service`、`ambience`、`reviews`、`price`、`distance` |
+| `hideClosed` | boolean | `false` | `true`时只返回正常经营记录；停业与删除是独立状态 |
+| `page` | integer | `1` | 1–2147483647；偏移量按long计算，避免溢出 |
+| `pageSize` | integer | `8` | 1–100；8沿用现有页面，100为本步查询上限，产品参数仍待审核，不将需求中的20条建议视为已批准 |
+
+筛选、计数、排序、分页均在数据库的完整未删除集合上执行。标签搜索使用EXISTS，不因同店多个命中标签重复计数；只对当前页批量读取有序标签。COUNT、餐厅和标签查询处于同一REPEATABLE_READ只读事务；读取开始后的并发修改在下次请求体现。
+
+`price`按人均升序，未知金额在末尾；`distance`按距清水河参考点（GCJ-02：30.7544、103.9312）的直线公里数升序，待定位在末尾，不代表导航路程。评分、四维和评价数排序目前均退化为名称、数值ID升序；人均和距离同值也使用该稳定后备次序。名称匹配和排序沿用MySQL的 `utf8mb4_0900_ai_ci`，支持常见大小写差异。
+
+M1没有评价，因此所有餐厅都为 `none`（待评级）。仅选其他杯型、只看推荐或只看踩雷返回空结果；选择 `none` 和其他杯型的并集仍可返回待评级。不能把待评级补成0分、推荐或踩雷。
+
+响应示例为**隔离测试夹具**，不代表生产店铺：
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "message": "请求成功",
+  "data": {
+    "records": [{
+      "id": "101",
+      "name": "测试餐厅",
+      "categoryCode": "OTHER",
+      "categoryName": "其他",
+      "pricePerPerson": 20,
+      "priceKind": "ESTIMATE",
+      "address": "测试地址",
+      "latitude": 30.754400,
+      "longitude": 103.931200,
+      "coordinateSystem": "GCJ02",
+      "needsLocation": false,
+      "businessStatus": "OPERATING",
+      "sourceType": "LEGACY_IMPORT",
+      "createdAt": "2026-10-28T01:02:03.123456Z",
+      "updatedAt": "2026-10-28T01:02:03.123456Z",
+      "distanceKm": 0.0,
+      "tags": ["测试标签"],
+      "score": null,
+      "recommendRate": null,
+      "reviewCount": 0,
+      "tier": "none",
+      "dimensions": { "taste": null, "value": null, "service": null, "ambience": null }
+    }],
+    "total": 1,
+    "page": 1,
+    "pageSize": 8,
+    "totalPages": 1
+  },
+  "timestamp": "2026-10-28T06:00:00Z"
+}
+```
+
+`id`始终为字符串。`pricePerPerson=null`和 `priceKind=UNKNOWN`表示未知；`EXACT`是填报金额，不表示平台已核实；`ESTIMATE`是估值。地址未知为null；待定位的经纬度及距离均为null。`sourceType`仅为 `USER` 或 `LEGACY_IMPORT`，后者不证明信息已核实或已认领。`OPERATING`表示经营记录，非此刻营业状态。
+
+所有评分、四维均分和推荐率均显式为null，评价数为0，不返回评价/图片数组冒充已实现能力。`records`只包含当前页；`total`是相同条件下的全部数量。空结果为 `records: []`、`total: 0`、`totalPages: 0`。越界页返回原请求页码与真实总数、空记录，不跳到最后一页，也不返回404。
+
+### 11.3 餐厅详情
+
+`GET /api/restaurants/{id}`，无查询参数；`id`为1–9223372036854775807的十进制正整数，不允许前导零、负数或原版 `r01`。成功200，`data`直接为11.2中单个餐厅对象，字段、空值、标签顺序和距离口径一致。例如 `GET /api/restaurants/101` 返回 `data.id: "101"`，不包含分页外层。
+
+格式错误返回400 `RESTAURANT_INVALID_ID`；不存在和已软删除均返回404 `RESTAURANT_NOT_FOUND`。停业餐厅仍可读取。列表与详情都不返回创建/修改者ID、删除时间/操作者/原因或行版本。详情尚无评价分页、图片墙或地图SDK。
+
+### 11.4 状态码与调用边界
+
+| HTTP | 错误码 | 含义 |
+| --- | --- | --- |
+| 200 | `OK` | 字典、列表或详情读取成功；列表无结果仍为200 |
+| 400 | `COMMON_VALIDATION_FAILED` | 列表参数类型、范围或白名单校验失败 |
+| 400 | `RESTAURANT_INVALID_ID` | 详情ID格式错误或超出Long范围 |
+| 404 | `RESTAURANT_NOT_FOUND` | 详情不存在或已删除 |
+| 401 | `AUTH_UNAUTHENTICATED` | 调用方主动携带了无效Bearer |
+| 503 | `AUTH_SERVICE_UNAVAILABLE` | 主动携带Bearer后认证依赖暂不可用 |
+| 500 | `COMMON_INTERNAL_SERVER_ERROR` | 未预期的读取/数据库故障；不能当成空目录 |
+
+匿名只读不依赖Redis会话查询；带Bearer时仍走原有认证链。不要把整个 `/api/restaurants/**` 或其他HTTP方法当成公开接口。
+
+## 12. 餐厅维护接口
+
+本节接口已在本仓库实现。前端新增、编辑和删除已接入本节接口，只读页面已接入第11节API；管理员回收站页面尚未实现。线上能力以实际部署版本为准。继续使用V3三张表，不修改V1/V2/V3。
+
+**当前保存规则**：用户决定餐厅不需要版本号。编辑、删除、恢复无需提交版本，响应不返回版本；最后成功保存的完整资料及标签生效，允许旧页面覆盖此前保存的内容。权限、当前删除状态、事务和标签一致性仍由服务端保证。用户账号的认证凭证版本与其他模块不受本次调整影响。
+
+### 12.1 权限与管理资料
+
+所有本节接口都必须携带有效Bearer，继续校验RS256 JWT、Redis会话、当前账号状态/凭证版本及数据库当前角色。创建者ID取自认证身份，管理员能力只取数据库角色，不信任JWT自报角色、用户名、请求体或查询参数。普通用户只管理自己创建的未删除餐厅；历史未知归属不允许认领。管理员可纠错、删除和恢复，但不能改写创建者与来源。
+
+`GET /api/restaurants/{id}/management` 无请求体、无查询参数。创建者/管理员成功200，`Cache-Control: no-store`；不存在返回404，非创建者返回403。已删除餐厅仅管理员可读，普通用户（包括创建者）读取返回404。该接口用于读取管理资料和删除状态，不再用于获取版本号。
+
+成功统一响应的 `data` 如下，`restaurant`字段结构与11.2一致，不含账号ID、版本或删除原因；示例仅为结构说明：
+
+```json
+{
+  "restaurant": {
+    "id": "101",
+    "name": "测试餐厅",
+    "categoryCode": "OTHER",
+    "categoryName": "其他",
+    "pricePerPerson": null,
+    "priceKind": "UNKNOWN",
+    "address": null,
+    "latitude": 30.754400,
+    "longitude": 103.931200,
+    "coordinateSystem": "GCJ02",
+    "needsLocation": false,
+    "businessStatus": "OPERATING",
+    "sourceType": "USER",
+    "createdAt": "2026-10-28T01:02:03.123456Z",
+    "updatedAt": "2026-10-28T01:02:03.123456Z",
+    "distanceKm": 0.0,
+    "tags": ["学生聚餐"],
+    "score": null,
+    "recommendRate": null,
+    "reviewCount": 0,
+    "tier": "none",
+    "dimensions": { "taste": null, "value": null, "service": null, "ambience": null }
+  },
+  "deleted": false
+}
+```
+
+创建、编辑、删除和恢复均返回该管理资料（在标准 `ApiResponse.data` 内），并设置 `Cache-Control: no-store`。`deleted`为当前删除状态，`restaurant.businessStatus`仍独立表示经营状态。删除成功的资料仅返回给完成授权的本次操作者，不使公开读取可见。
+
+### 12.2 新建餐厅
+
+`POST /api/restaurants`，需要登录。提交JSON，不接受客户端指定ID、创建者、来源、分数、版本或删除信息。
+
+| 字段 | 必填/默认 | 规则 |
+| --- | --- | --- |
+| `name` | 必填 | 去首尾Unicode空白后1–40个Unicode码点，允许同名分店 |
+| `categoryCode` | 必填 | 1–32位规范大写字母/数字/下划线且以字母开头；必须存在且启用 |
+| `priceKind` | 默认 `UNKNOWN` | `UNKNOWN`、`EXACT`、`ESTIMATE`，显式null不允许 |
+| `pricePerPerson` | 默认null | `UNKNOWN`必须为null；`EXACT/ESTIMATE`必须为1–5000的整数数值，不截断小数金额；EXACT不表示平台核实 |
+| `address` | 默认null | 去首尾Unicode空白后最多80个Unicode码点，空白转null |
+| `latitude` | 必填 | 数值3–54，最多6位有效小数 |
+| `longitude` | 必填 | 数值73–136，最多6位有效小数 |
+| `coordinateSystem` | 默认 `GCJ02` | 只允许 `GCJ02`，显式null不允许，不自动转换外部坐标 |
+| `locationConfirmed` | 必填 | 必须为true，不允许无位置发布；服务端不自动填默认校园坐标，准确性需提交者确认 |
+| `businessStatus` | 默认 `OPERATING` | `OPERATING`或 `CLOSED`，显式null不允许 |
+| `tags` | 默认空数组 | 最多提交8项，不能为null；各项去首尾空白后非空，按数据库排序规则去重保留首项和顺序；去重后总Unicode码点数最多80 |
+
+Unicode长度与Java的UTF-16长度不同，例如单个emoji按一个码点计数。标签去重使用MySQL的 `utf8mb4_0900_ai_ci` 规则，常见大小写和重音等价项只保留第一个。保存失败不会留下餐厅或半组标签。
+
+```json
+{
+  "name": "测试餐厅",
+  "categoryCode": "OTHER",
+  "priceKind": "ESTIMATE",
+  "pricePerPerson": 25,
+  "address": "测试地址",
+  "latitude": 30.754400,
+  "longitude": 103.931200,
+  "coordinateSystem": "GCJ02",
+  "locationConfirmed": true,
+  "businessStatus": "OPERATING",
+  "tags": ["学生聚餐", "晚餐"]
+}
+```
+
+成功201，`Location: /api/restaurants/{新ID}`，`data`为12.1管理资料，`deleted: false`、`sourceType: "USER"`。创建/修改者由当前账号写入。不会生成评价、评分、其他店铺或新登录会话，不发邮件。同名不覆盖已有记录；当前没有请求幂等键，超时应先核对结果，不要自动无限重试POST。
+
+### 12.3 编辑资料、标签及经营状态
+
+`PUT /api/restaurants/{id}`，创建者或管理员。JSON字段与12.2相同，无需 `rowVersion`；成功200，`data`为最新管理资料，不返回版本。若仍在创建/编辑JSON中提交旧 `rowVersion`，按未知字段返回400 `COMMON_MALFORMED_REQUEST`。
+
+这是**完整替换**：必须重新提交名称、分类、坐标、位置确认；省略地址会清空，省略标签会清空，省略人均会回到UNKNOWN，省略经营状态按OPERATING保存。客户端应填写完整请求，不能当作局部PATCH。可通过 `businessStatus` 切换停业/正常经营，停业不等于删除。
+
+采用最后成功保存覆盖：两人打开同一份资料后都可以依次成功保存，后保存的完整资料覆盖前一次，包括旧页面携带的旧值；不会因资料在页面打开后被别人改过而报版本冲突。新分类必须启用，当前已停用分类允许保持原值。修改历史记录仍保留原来源和创建者；补齐位置后清除待定位状态。未知/内部JSON字段拒绝，不允许提交创建者、来源或评分。
+
+事务内先 `SELECT … FOR UPDATE` 锁主行核验当前权限和删除状态，UPDATE按ID、归属和未删除条件执行，不比较版本。同一家店的并发写入串行执行，资料、整组标签、操作者和修改时间同事务保存，任一步失败全部回滚。最终资料和标签必须完整来自同一次保存，不会交叉混合。原V3的 `row_version` 列保留，但应用不读取、比较或递增；本次不修改迁移。
+
+### 12.4 软删除
+
+`DELETE /api/restaurants/{id}`，创建者或管理员，**无查询参数、无请求体、无需版本**。
+
+成功200，`data`为管理资料，`deleted: true`。记录当前操作者、删除时间及固定原因：普通创建者为 `OWNER_REQUEST`，管理员为 `ADMIN_REMOVAL`，原因不能由客户端指定。标签保留，公开列表、搜索、计数及详情均隐藏，公开详情404。
+
+普通用户重复删除已删除记录返回404 `RESTAURANT_NOT_FOUND`；管理员重复删除返回409 `RESTAURANT_STATE_CONFLICT`。不会重复修改删除元数据。删除以执行时的当前授权/状态为准，允许删除页面打开后已被别人修改的餐厅。没有永久删除接口；D02中有他人评价后能否自删仍待评价阶段确认。
+
+### 12.5 管理员恢复
+
+`POST /api/restaurants/{id}/restore`，仅数据库当前角色包含 `ROLE_ADMIN` 的账号，**无查询参数、无请求体、无需版本**。
+
+成功200，`data`为管理资料，`deleted: false`。清空当前删除时间、操作者和原因，记录恢复操作者/修改时间，保留原创建者、来源、经营状态和标签。不因恢复将停业改为正常经营，也不创建账号归属。
+
+记录不存在返回404；记录尚未删除或重复恢复返回409 `RESTAURANT_STATE_CONFLICT`。普通用户即使是创建者也返回403 `AUTH_FORBIDDEN`。回收站分页、审计历史及评价/回复/图片的独立恢复尚未实现。
+
+### 12.6 错误与并发约定
+
+ID沿用11.3的规范正Long字符串。餐厅接口不再定义或返回 `RESTAURANT_INVALID_VERSION`、`RESTAURANT_VERSION_CONFLICT`；409仅表示当前删除状态或数据库约束等实际状态冲突，不能当成旧页面版本失效。
+
+| HTTP | 错误码 | 适用情况 |
+| --- | --- | --- |
+| 400 | `COMMON_VALIDATION_FAILED` | 必填字段、编码、位置确认或标签数量校验失败，含字段详情 |
+| 400 | `COMMON_MALFORMED_REQUEST` | JSON不可读/类型不匹配，或创建/编辑JSON含未知/内部字段（包括旧rowVersion） |
+| 400 | `RESTAURANT_INVALID_INPUT` | Unicode长度、价格组合、坐标范围/精度或标签总长不符 |
+| 400 | `RESTAURANT_INVALID_ID` | 资源ID不合法或溢出 |
+| 400 | `RESTAURANT_CATEGORY_UNAVAILABLE` | 分类不存在，新建/切换分类已停用 |
+| 401 | `AUTH_UNAUTHENTICATED` | 缺失/过期/撤销身份，账号停用或认证凭证版本失效 |
+| 403 | `RESTAURANT_FORBIDDEN` | 普通用户管理他人或历史未知归属的未删除店铺 |
+| 403 | `AUTH_FORBIDDEN` | 普通用户调用管理员恢复 |
+| 404 | `RESTAURANT_NOT_FOUND` | 不存在，或普通用户操作已删除餐厅 |
+| 409 | `RESTAURANT_STATE_CONFLICT` | 管理员编辑/再删已删除餐厅，或恢复未删除餐厅 |
+| 409 | `COMMON_DATA_CONFLICT` | 未提前拦截的数据库约束冲突，事务回滚 |
+| 503 | `AUTH_SERVICE_UNAVAILABLE` | 认证依赖临时不可用，拒绝写入 |
+| 500 | `COMMON_INTERNAL_SERVER_ERROR` | 未预期的数据库/标签保存故障，事务回滚 |
+
+并发编辑均可成功，最后成功写入的完整资料及标签生效。并发编辑/删除：编辑先执行则两者可依次成功、最终删除；删除先执行则后续普通用户编辑404，管理员编辑409，PUT不能意外恢复删除记录。恢复后再保存仍允许按当前状态覆盖。所有控制都在服务端执行，不因取消版本号取消权限或事务。
+
+创建仍直接写入；审核、频率限制、同名同址提示和有评价后的删除限制属于后续范围，基础CRUD不代表完整治理完成。
+
+## 13. 尚未实现与维护要求
+
+尚未提供刷新令牌、列出设备、退出其他会话、评价、图片及地图等业务接口。餐厅只读、创建、编辑、软删除、管理快照和管理员恢复已在当前工作区实现，尚未部署；分类、列表、详情、新增、编辑和删除已接入前端，管理员回收站列表与页面尚未实现；密码重置及基础认证验收已由用户确认通过。不要将其他计划中的路径作为现有API调用。
+
+前端的 `/restaurants/:id`、`/restaurants/new`、`/restaurants/:id/edit`、`/scoring-guide` 是客户端页面路由。餐厅前端已接入第11节分类、列表和独立详情；所有筛选、排序、计数和分页由服务端执行，tiers按重复查询参数发送。支持加载、防抖搜索、取消旧请求、失败重试、404及真实空态，不回退到预览快照。三个公开GET默认不携带旧Bearer，管理GET和所有写操作仍携带登录凭证。
+
+维护页先读取字典；编辑读取12.1管理快照后填入全部可编辑字段，始终提交12.2定义的完整请求，未知价格及空地址显式为null、空标签为数组，编辑不发送局部PATCH。当前仅手动填写并确认GCJ-02坐标，修改任一坐标后需重新确认；停用分类只允许保留原值。标签输入每行一个、忽略空行，客户端按输入总字符数保守校验80，服务端再按数据库规则去重并核验。详情仅在管理快照读取成功且未删除时显示编辑/删除，403不影响公开阅读，最终写入仍重新鉴权。
+
+维护请求固定使用发起操作时的Bearer，避免排队时切换账号后提交原草稿；身份或路由变化丢弃旧响应。账号变化锁住原表单，重新进入后才能提交。浏览器只对当前操作禁用重复点击，没有增加服务端幂等键；POST超时不自动重发，提示先核对结果。删除经二次确认，无请求体、无版本参数；成功后使目录缓存失效，保留条件/页码并在下次查询时校正有效末页。登录页仅允许回跳本站规范的餐厅页面路径，其他目标返回首页。
+
+本地开发库已执行V3，并按用户要求通过 [联调数据工具](../backend/tools/seed_restaurants.py) 手动写入25家原版候选，统一带“联调模拟”标签。数据来源为LEGACY_IMPORT、归属未知、旧档位价格为ESTIMATE、坐标为null且needsLocation=true、无评价和评分。重复执行跳过已有同名店（含软删除），不覆盖、不恢复或认领账号，不接触生产库；V3自身仍只初始化分类。操作说明见 [README](../README.md#本地启动)。
 
 每次新增、修改或删除接口时同步更新本文，包括HTTP方法、路径、认证/角色要求、参数及默认规则、响应示例、状态码、错误码和重要副作用。接口行为以Controller、DTO、Service、安全配置及当前部署配置共同决定，不能只从Controller注解推断。
 
