@@ -4,6 +4,19 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/restaurants/:id',
+      name: 'restaurant-detail',
+      component: () => import('@/pages/restaurant/RestaurantPage.vue'),
+      props: true,
+      meta: { title: '餐厅详情' },
+    },
+    {
+      path: '/scoring-guide',
+      name: 'scoring-guide',
+      component: () => import('@/pages/scoring/ScoringGuidePage.vue'),
+      meta: { title: '杯型评分说明' },
+    },
+    {
       path: '/password-reset',
       name: 'password-reset',
       component: () => import('@/pages/password-reset/PasswordResetPage.vue'),

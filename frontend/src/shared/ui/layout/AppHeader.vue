@@ -22,8 +22,8 @@ defineEmits<{ logout: []; retry: [] }>()
     </RouterLink>
 
     <nav aria-label="主要导航">
-      <RouterLink to="/">地图首页</RouterLink>
-      <button type="button" disabled>排行榜</button>
+      <RouterLink to="/">发现美食</RouterLink>
+      <RouterLink to="/scoring-guide">评分说明</RouterLink>
       <template v-if="authenticated">
         <span class="account-name" :title="username">{{ username }}</span>
         <button class="login-button" type="button" :disabled="loggingOut" @click="$emit('logout')">

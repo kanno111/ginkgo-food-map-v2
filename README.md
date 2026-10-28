@@ -12,14 +12,18 @@ V2 是对旧版 Ginkgo 美食地图的渐进式重构。第一阶段采用模块
 - 已接入 MySQL、Redis、Flyway、MyBatis-Plus、Spring Security 和 Actuator
 - 已提供 MySQL 与 Redis 的 Compose 配置
 - 已实现校园邮箱验证码注册、用户名密码登录、JWT 与 Redis 会话校验、当前用户查询和退出当前会话
-- 暂未迁移旧系统业务和数据
+- 已实现默认保留登录与邮箱验证码找回密码，用户已确认基础认证验收通过
+- 当前功能分支已完成餐厅目录、详情与评分说明的前端预览，提供搜索筛选和分页
+- 餐厅预览仅使用明确标识的原版候选信息；真实餐厅接口、美食地图、评价业务及数据迁移尚未完成
 
 ## 项目文档
 
 - [功能说明](docs/features.md)：使用非技术人员也能理解的语言说明当前可用和计划中的功能。
+- [需求与重构说明](docs/requirements.md)：基于原项目整理详细业务需求、权限与评分规则、验收标准、迁移计划和待确认事项。
 - [接口文档](docs/api.md)：维护已实现接口的认证要求、请求参数、响应示例、错误码及联调方法。
 - [自动部署](docs/deployment.md)：develop 推送检查与发布、服务器结构、排查及回滚边界。
 - [开发记录](docs/development.md)：记录阶段性变更、关键决策和验证结果。
+- [后续开发记录](docs/development2.md)：认证功能、自动发布及需求梳理的后续记录。
 
 ## 目录
 
@@ -94,7 +98,7 @@ JWT 使用 `backend/secrets/jwt-private.pem`（PKCS#8 私钥）和
 `JWT_PRIVATE_KEY_LOCATION`、`JWT_PUBLIC_KEY_LOCATION` 指定部署环境管理的匹配 RSA 密钥。
 应用启动时会校验密钥至少2048位且公私钥匹配，缺失或不匹配时拒绝启动。
 
-当前认证接口：`POST /auth/login`、`GET /auth/me`、`POST /auth/logout`。
+主要认证入口：`POST /auth/register`、`POST /auth/login`、`GET /auth/me`、`POST /auth/logout`、`POST /auth/password-reset`；验证码申请路径与完整协议见接口文档。
 登录以 JSON 提交 `username`、`password`，成功后用
 `Authorization: Bearer <accessToken>` 访问需要认证的接口。响应中的 `expiresAt` 是本次会话截止时间。
 当前没有刷新令牌，过期后需要重新登录。不要在日志中记录登录请求或响应中的敏感字段。
