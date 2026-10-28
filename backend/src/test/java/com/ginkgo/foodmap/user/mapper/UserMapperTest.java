@@ -113,6 +113,38 @@ class UserMapperTest {
         assertThat(userMapper.updateById(staleTransaction)).isZero();
     }
 
+    /** 自定义密码更新同时递增两个版本，陈旧版本或错误邮箱不能覆盖已提交的密码。 */
+    @Test
+    void shouldAtomicallyResetPasswordAndRejectStaleSnapshot() {
+        UserEntity user = UserEntity.registerVerified("reset_user", "reset@std.uestc.edu.cn", PASSWORD_HASH);
+        userMapper.insert(user);
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), 0, 0, "new-hash")).isEqualTo(1);
+        UserEntity changed = userMapper.selectById(user.getId());
+        assertThat(changed.getPasswordHash()).isEqualTo("new-hash");
+        assertThat(changed.getCredentialVersion()).isEqualTo(1L);
+        assertThat(changed.getRowVersion()).isEqualTo(1L);
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), 0, 0, "stale")).isZero();
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), 1, 0, "stale")).isZero();
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), 0, 1, "stale")).isZero();
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), "other@std.uestc.edu.cn", 1, 1, "wrong")).isZero();
+        assertThat(userMapper.selectById(user.getId()).getPasswordHash()).isEqualTo("new-hash");
+    }
+
+    /** 哈希计算期间账号被停用或取消邮箱验证，即使两个版本未变化也不能完成密码更新。 */
+    @Test
+    void shouldRejectPasswordUpdateForUnavailableAccount() {
+        UserEntity user = UserEntity.registerVerified("reset_disabled", "disabled@std.uestc.edu.cn", PASSWORD_HASH);
+        user.setStatus(com.ginkgo.foodmap.user.domain.UserStatus.DISABLED);
+        userMapper.insert(user);
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), 0, 0, "new-hash")).isZero();
+        user.setStatus(com.ginkgo.foodmap.user.domain.UserStatus.ACTIVE);
+        user.setEmailVerified(false);
+        userMapper.updateById(user);
+        assertThat(userMapper.resetPasswordIfCurrent(user.getId(), user.getEmail(), user.getRowVersion(), 0, "new-hash"))
+                .isZero();
+        assertThat(userMapper.selectById(user.getId()).getPasswordHash()).isEqualTo(PASSWORD_HASH);
+    }
+
     /** 验证复合主键关系表使用显式 SQL 完成角色分配和查询。 */
     @Test
     void shouldInsertAndFindExplicitUserRole() {

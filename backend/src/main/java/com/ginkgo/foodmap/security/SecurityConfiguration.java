@@ -61,6 +61,7 @@ public class SecurityConfiguration {
                                 HttpMethod.POST,
                                 "/auth/register",
                                 "/auth/login",
+                                "/auth/password-reset",
                                 "/auth/email/code/register",
                                 "/auth/email/code/password-reset"
                         ).permitAll()

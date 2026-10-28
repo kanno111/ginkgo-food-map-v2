@@ -30,6 +30,8 @@ describe('authenticated HTTP client', () => {
     await httpClient.get('/auth/me')
     await httpClient.post('/auth/login', {})
     await httpClient.post('/auth/register', {})
+    await httpClient.post('/auth/password-reset', {})
+    await httpClient.post('/auth/email/code/password-reset', {})
     await httpClient.get('/api/public/status')
     expect(sent[0]?.headers.Authorization).toBe('Bearer current-session')
     for (const config of sent.slice(1)) expect(config.headers.Authorization).toBeUndefined()
@@ -52,6 +54,7 @@ describe('authenticated HTTP client', () => {
     }
     await expect(httpClient.get('/auth/me')).rejects.toThrow()
     expect(getAccessToken()).toBeNull()
+    expect(localStorage.getItem('ginkgo.access-token')).toBeNull()
   })
 
   it('does not clear a new session when an old request returns 401', async () => {

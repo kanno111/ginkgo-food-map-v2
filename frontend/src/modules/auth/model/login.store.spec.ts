@@ -25,15 +25,15 @@ describe('login store', () => {
     vi.resetAllMocks()
   })
 
-  it('keeps the session in this tab without retaining the password', async () => {
+  it('persists the session across browser restarts without retaining the password', async () => {
     vi.mocked(login).mockResolvedValue(result)
     const store = useLoginStore()
     expect(await store.submit(request)).toBe(true)
     expect(store.authenticated).toBe(true)
     expect(store.user).toEqual(user)
     expect(getAccessToken()).toBe('test-session')
-    expect(sessionStorage.getItem('ginkgo.access-token')).toBe('test-session')
-    expect(localStorage.length).toBe(0)
+    expect(localStorage.getItem('ginkgo.access-token')).toBe('test-session')
+    expect(sessionStorage.getItem('ginkgo.access-token')).toBeNull()
     expect(JSON.stringify(store.$state)).not.toContain(request.password)
   })
 
@@ -79,6 +79,7 @@ describe('login store', () => {
     await store.signOut()
     expect(getAccessToken()).toBeNull()
     expect(store.user).toBeNull()
+    expect(localStorage.getItem('ginkgo.access-token')).toBeNull()
     expect(store.authenticated).toBe(false)
   })
 
@@ -125,5 +126,42 @@ describe('login store', () => {
     clearAccessToken('test-session')
     expect(store.user).toBeNull()
     expect(store.authenticated).toBe(false)
+  })
+
+  it('discards the old identity when another tab switches accounts', async () => {
+    vi.mocked(login).mockResolvedValue(result)
+    const store = useLoginStore()
+    await store.submit(request)
+    setAccessToken('other-account-session')
+    expect(store.user).toBeNull()
+    expect(store.authenticated).toBe(false)
+    vi.mocked(fetchCurrentUser).mockResolvedValue({
+      id: 43,
+      username: 'other_user',
+      roles: ['ROLE_USER'],
+    })
+    await store.restore()
+    expect(store.user?.username).toBe('other_user')
+  })
+
+  it('can restore a new token while a previous restoration is still pending', async () => {
+    setAccessToken('old-session')
+    let finishOld!: (value: CurrentUser) => void
+    vi.mocked(fetchCurrentUser).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve
+        }),
+    )
+    const store = useLoginStore()
+    const pendingOld = store.restore()
+    setAccessToken('new-session')
+    const otherUser = { id: 43, username: 'other_user', roles: ['ROLE_USER'] }
+    vi.mocked(fetchCurrentUser).mockResolvedValueOnce(otherUser)
+    await store.restore()
+    finishOld(user)
+    await pendingOld
+    expect(store.user).toEqual(otherUser)
+    expect(store.restoring).toBe(false)
   })
 })

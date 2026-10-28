@@ -12,6 +12,7 @@ export const httpClient = axios.create({
 const publicAuthPaths = new Set([
   '/auth/login',
   '/auth/register',
+  '/auth/password-reset',
   '/auth/email/code/register',
   '/auth/email/code/password-reset',
 ])

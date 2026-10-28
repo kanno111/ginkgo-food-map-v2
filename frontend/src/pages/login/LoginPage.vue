@@ -8,7 +8,9 @@ import { LoginForm } from '@/modules/auth'
       <p class="eyebrow">GINKGO FOOD MAP</p>
       <h2 id="login-intro-title">下一顿，<br />一起发现。</h2>
       <p>登录你的账号，继续记录校园里的美食记忆。</p>
-      <p class="session-hint">当前标签页刷新后会保持登录。使用公共电脑时，请在离开前退出账号。</p>
+      <p class="session-hint">
+        登录后会自动保留登录状态，关闭页面后再次访问也可恢复。使用公共电脑时，请在离开前退出账号。
+      </p>
     </section>
     <LoginForm />
   </div>

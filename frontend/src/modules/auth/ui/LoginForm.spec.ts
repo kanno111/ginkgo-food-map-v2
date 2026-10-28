@@ -16,7 +16,7 @@ describe('login form', () => {
   let pinia: ReturnType<typeof createPinia>
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: ['/', '/login', '/register'].map((path) => ({
+    routes: ['/', '/login', '/register', '/password-reset'].map((path) => ({
       path,
       component: { template: '<div />' },
     })),
@@ -60,6 +60,11 @@ describe('login form', () => {
     await fillAndSubmit('', '')
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('请输入用户名和密码')
     expect(login).not.toHaveBeenCalled()
+  })
+
+  it('provides a password reset entry without a remember-me checkbox', () => {
+    expect(host.querySelector('.recovery-link a')?.getAttribute('href')).toBe('/password-reset')
+    expect(host.querySelector('input[type="checkbox"]')).toBeNull()
   })
 
   it('shows a server error and clears the password after failure', async () => {

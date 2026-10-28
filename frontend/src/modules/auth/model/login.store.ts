@@ -20,15 +20,16 @@ export const useLoginStore = defineStore('login', () => {
   const authenticated = computed(() => user.value !== null && authToken.value !== null)
   const hasSession = computed(() => authToken.value !== null)
   let revision = 0
+  let restoringToken: string | null = null
 
-  // 401 清理凭证时同步清除导航账号，并使尚未完成的请求结果失效。
+  // 包括其他标签页登录在内的任何凭证变化，都先移除旧身份并丢弃在途请求结果。
   watch(
     authToken,
-    (value) => {
-      if (value === null) {
-        user.value = null
-        revision++
-      }
+    () => {
+      user.value = null
+      revision++
+      restoringToken = null
+      restoring.value = false
     },
     { flush: 'sync' },
   )
@@ -56,8 +57,9 @@ export const useLoginStore = defineStore('login', () => {
   /** 刷新后由服务端重新验证身份；网络故障保留凭证以供重试，401由HTTP层清理。 */
   async function restore(): Promise<void> {
     const token = getAccessToken()
-    if (!token || restoring.value) return
+    if (!token || restoringToken === token) return
     const current = ++revision
+    restoringToken = token
     restoring.value = true
     error.value = null
     try {
@@ -66,7 +68,11 @@ export const useLoginStore = defineStore('login', () => {
     } catch (reason) {
       if (getAccessToken() === token) error.value = toErrorMessage(reason)
     } finally {
-      restoring.value = false
+      // 凭证切换后允许立即校验新会话；旧请求完成不能关闭新请求的加载状态。
+      if (restoringToken === token) {
+        restoringToken = null
+        restoring.value = false
+      }
     }
   }
 

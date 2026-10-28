@@ -54,6 +54,7 @@ onBeforeUnmount(() => {
         :disabled="auth.loggingIn"
       />
     </div>
+    <p class="recovery-link"><RouterLink to="/password-reset">忘记密码？</RouterLink></p>
     <p v-if="validation || auth.error" class="form-error" role="alert">
       {{ validation || auth.error }}
     </p>
@@ -114,6 +115,11 @@ input:focus {
   color: #8b2f29;
   background: #fbe7e3;
   line-height: 1.6;
+}
+.recovery-link {
+  margin: 12px 0 0;
+  text-align: right;
+  font-size: 14px;
 }
 button {
   width: 100%;

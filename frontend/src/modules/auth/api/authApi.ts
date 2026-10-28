@@ -3,6 +3,17 @@ import { httpClient } from '@/shared/api/httpClient'
 
 import type { RegistrationRequest } from '../model/registration.types'
 import type { CurrentUser, LoginRequest, LoginResponse } from '../model/login.types'
+import type { PasswordResetRequest } from '../model/passwordReset.types'
+
+/** 未注册邮箱也返回相同受理结果，页面不得据此推断账号是否存在。 */
+export async function sendPasswordResetCode(email: string): Promise<void> {
+  await httpClient.post<ApiResponse<null>>('/auth/email/code/password-reset', { email })
+}
+
+/** 使用专用验证码设置新密码；成功后所有旧凭证失效，仍须单独登录。 */
+export async function resetPassword(request: PasswordResetRequest): Promise<void> {
+  await httpClient.post<ApiResponse<null>>('/auth/password-reset', request)
+}
 
 /** 请求发送注册验证码；是否允许发送及频率限制最终由服务端决定。 */
 export async function sendRegistrationCode(email: string): Promise<void> {

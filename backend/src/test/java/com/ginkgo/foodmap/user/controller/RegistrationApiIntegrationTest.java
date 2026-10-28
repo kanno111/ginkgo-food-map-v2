@@ -39,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 注册异常场景的完整接口集成测试，使用真实 MySQL、Flyway、Mapper、事务、BCrypt 和 Redis Lua。
+ * 注册、登录与密码重置的完整接口集成测试，使用真实 MySQL、Flyway、Mapper、事务、BCrypt 和 Redis Lua。
  *
  * <p>显式传入 {@code -Dauth.integration=true} 并通过 {@code AUTH_TEST_DB_PASSWORD} 提供本机
  * MySQL 密码后运行。每次运行创建随机命名的临时数据库，绝不连接业务数据库；Redis 使用4号库的
@@ -269,6 +269,112 @@ class RegistrationApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("AUTH_LOGIN_LOCKED"));
     }
 
+    /** 真实验证码只能改密一次，两个旧会话同时失效，新密码能重新登录。 */
+    @Test
+    void shouldResetPasswordOnceAndRevokeAllOldCredentials() throws Exception {
+        String email = "resetflow@std.uestc.edu.cn";
+        createResetAccount(email, "reset_flow_user");
+        rememberLoginKeys("reset_flow_user");
+        String first = loginToken("reset_flow_user");
+        String second = loginToken("reset_flow_user");
+        String code = activeCode(VerificationCodePurpose.PASSWORD_RESET, email);
+        postPasswordReset(email, code, "NewPassword2026").andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").doesNotExist());
+        assertThat(jdbcTemplate.queryForObject("SELECT credential_version FROM users WHERE email = ?",
+                Long.class, email)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("SELECT row_version FROM users WHERE email = ?",
+                Long.class, email)).isEqualTo(1L);
+        for (String token : List.of(first, second)) {
+            assertThat(redisTemplate.hasKey("auth:session:" + jwtDecoder.decode(token).getId())).isTrue();
+            mockMvc.perform(get("/auth/me").header("Authorization", "Bearer " + token))
+                    .andExpect(status().isUnauthorized());
+        }
+        postPasswordReset(email, code, "ReplayPassword2026").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CODE_INVALID_OR_EXPIRED"));
+        postLogin("reset_flow_user", "Ginkgo2026").andExpect(status().isUnauthorized());
+        String fresh = loginToken("reset_flow_user", "NewPassword2026");
+        mockMvc.perform(get("/auth/me").header("Authorization", "Bearer " + fresh)).andExpect(status().isOk());
+        String hash = jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        assertThat(passwordEncoder.matches("NewPassword2026", hash)).isTrue();
+        assertThat(passwordEncoder.matches("ReplayPassword2026", hash)).isFalse();
+    }
+
+    /** 注册用途的验证码不能用于改密；失败不能更新密码或凭证版本。 */
+    @Test
+    void shouldRejectRegistrationCodeForPasswordReset() throws Exception {
+        String email = "resetpurpose@std.uestc.edu.cn";
+        createResetAccount(email, "reset_purpose_user");
+        String code = activeCode(email);
+        postPasswordReset(email, code, "NewPassword2026").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CODE_INVALID_OR_EXPIRED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT credential_version FROM users WHERE email = ?",
+                Long.class, email)).isZero();
+        String hash = jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        assertThat(passwordEncoder.matches("Ginkgo2026", hash)).isTrue();
+    }
+
+    /** MySQL 重音不敏感索引会命中相似邮箱，但另一个邮箱的验证码不能修改绑定账号。 */
+    @Test
+    void shouldRejectAccentedMailboxAliasForPasswordReset() throws Exception {
+        String email = "resetalias@std.uestc.edu.cn";
+        String alias = "résétalias@std.uestc.edu.cn";
+        createResetAccount(email, "reset_alias_user");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users WHERE email = ?",
+                Integer.class, alias)).isEqualTo(1);
+        String code = activeCode(VerificationCodePurpose.PASSWORD_RESET, alias);
+        postPasswordReset(alias, code, "NewPassword2026").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CODE_INVALID_OR_EXPIRED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT credential_version FROM users WHERE email = ?",
+                Long.class, email)).isZero();
+        String hash = jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        assertThat(passwordEncoder.matches("Ginkgo2026", hash)).isTrue();
+    }
+
+    /** 两个并发请求共享同一真实验证码，必须只有一个成功且凭证版本只递增一次。 */
+    @Test
+    void shouldAllowOnlyOneConcurrentPasswordReset() throws Exception {
+        String email = "resetconcurrent@std.uestc.edu.cn";
+        createResetAccount(email, "reset_concurrent_user");
+        String code = activeCode(VerificationCodePurpose.PASSWORD_RESET, email);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> {
+                start.await();
+                return postPasswordReset(email, code, "FirstPassword2026").andReturn().getResponse().getStatus();
+            });
+            var second = executor.submit(() -> {
+                start.await();
+                return postPasswordReset(email, code, "SecondPassword2026").andReturn().getResponse().getStatus();
+            });
+            start.countDown();
+            assertThat(List.of(first.get(15, java.util.concurrent.TimeUnit.SECONDS),
+                    second.get(15, java.util.concurrent.TimeUnit.SECONDS))).containsExactlyInAnyOrder(200, 400);
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT credential_version FROM users WHERE email = ?",
+                Long.class, email)).isEqualTo(1L);
+        String hash = jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        assertThat(passwordEncoder.matches("FirstPassword2026", hash)
+                ^ passwordEncoder.matches("SecondPassword2026", hash)).isTrue();
+    }
+
+    /** 直接建立受控测试账号，避免注册发码冷却影响后续重置发码，不修改任何验证码限制。 */
+    private void createResetAccount(String email, String username) {
+        jdbcTemplate.update("""
+                INSERT INTO users(username, email, password_hash, email_verified, email_verified_at)
+                VALUES (?, ?, ?, TRUE, CURRENT_TIMESTAMP(6))
+                """, username, email, passwordEncoder.encode("Ginkgo2026"));
+        jdbcTemplate.update("""
+                INSERT INTO user_roles(user_id, role_id)
+                SELECT u.id, r.id FROM users u CROSS JOIN roles r WHERE u.email = ? AND r.code = 'ROLE_USER'
+                """, email);
+    }
+
+    private ResultActions postPasswordReset(String email, String code, String password) throws Exception {
+        return mockMvc.perform(post("/auth/password-reset").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(java.util.Map.of("email", email,
+                        "verificationCode", code, "newPassword", password))));
+    }
+
     private void rememberLoginKeys(String username) {
         Long userId = jdbcTemplate.queryForObject("SELECT id FROM users WHERE username = ?", Long.class, username);
         String key = loginProtection.key(userId, username);
@@ -276,7 +382,11 @@ class RegistrationApiIntegrationTest {
     }
 
     private String loginToken(String username) throws Exception {
-        String body = postLogin(username, "Ginkgo2026").andExpect(status().isOk())
+        return loginToken(username, "Ginkgo2026");
+    }
+
+    private String loginToken(String username, String password) throws Exception {
+        String body = postLogin(username, password).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String token = json.readTree(body).path("data").path("accessToken").asText();
         authKeys.add("auth:session:" + jwtDecoder.decode(token).getId());
@@ -290,8 +400,11 @@ class RegistrationApiIntegrationTest {
 
     /** 通过真实 Redis 流程生成测试验证码，不通过 SMTP 发送。 */
     private String activeCode(String email) {
-        VerificationCodeReservation reservation = verificationCodeService.reserve(
-                VerificationCodePurpose.REGISTER, email);
+        return activeCode(VerificationCodePurpose.REGISTER, email);
+    }
+
+    private String activeCode(VerificationCodePurpose purpose, String email) {
+        VerificationCodeReservation reservation = verificationCodeService.reserve(purpose, email);
         verificationCodeService.activate(reservation);
         return reservation.getCode();
     }

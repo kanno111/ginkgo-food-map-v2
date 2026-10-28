@@ -1,8 +1,10 @@
 # Ginkgo 美食地图 V2 接口文档
 
-最后核对日期：2026-10-27。
+最后核对日期：2026-10-28。
 
 本文面向前后端联调和接口调用者，仅描述当前已实现的接口。参数规则和频率限制中的数值为仓库默认配置，部署环境可以覆盖允许域名、有效期和限流策略。
+
+本次新增的密码重置提交接口、对应前端页面及登录凭证持久保存已在功能分支实现，尚未合并发布；线上是否具备此能力须以实际发布版本为准。
 
 ## 1. 地址与通用约定
 
@@ -73,12 +75,21 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 ### 1.2 认证与错误处理
 
 - 只有总览明确标记为公开的 HTTP 方法和路径允许匿名访问；不要把整个 `/auth` 当作公开路径。
-- 登录、注册和验证码请求应省略 `Authorization`。即使接口公开，主动携带无效、过期或已撤销的 Bearer 令牌也会触发认证失败。
+- 登录、注册、密码重置和验证码请求应省略 `Authorization`。即使接口公开，主动携带无效、过期或已撤销的 Bearer 令牌也会触发认证失败。
 - 受保护请求同时检查 JWT 签名、发行方、受众、有效期、Redis 会话、最新账号状态及凭证版本。角色使用数据库当前值。
 - 受保护请求返回401时，可以清除该请求使用的本地凭证并引导重新登录；旧请求的401不能清除之后新登录得到的凭证。登录接口本身的401表示登录失败。
 - 403表示权限不足；429表示限流；503表示服务暂不可用。503不应被当成“密码错误”或“退出成功”，可保留凭证供重试。
 - 安全过滤器生成的401包含 `WWW-Authenticate: Bearer`。登录成功、当前用户成功响应和过滤器错误响应设置 `Cache-Control: no-store`。
 - 请求方法不匹配时，如果匿名请求先被安全过滤器拦截，可能返回401；通过认证后到达 MVC 才可能得到405。不要依赖错误方法判断接口是否存在。
+
+### 1.3 浏览器客户端的登录保存
+
+- 前端默认将JWT保存到同源 `localStorage`（键名 `ginkgo.access-token`），无“记住我”选项，不保存密码；关闭页面或浏览器后可恢复，仍须调用 `/auth/me` 通过服务端验证后才显示为已登录。
+- 同一浏览器同源标签页共享凭证，登录、切换账号或清除凭证后通过 `storage` 事件同步；旧请求的401不得清除其他标签页刚写入的新凭证。不同来源（包括HTTP/HTTPS或端口不同）不共享存储。
+- 升级时迁移当前标签页的旧 `sessionStorage` 凭证并清除旧副本；持久存储中已有凭证时优先使用持久凭证。存储访问被浏览器拒绝时退化为本页面内存会话，不保证关闭后恢复。
+- JWT与Redis会话的有效期不变，默认7天；没有刷新令牌或滑动续期。过期、撤销或凭证版本不匹配时，由受保护请求的401清除对应本地凭证；503保留以便重试。
+- 找回密码页路径为 `/password-reset`，依次调用3.2及4.2接口，均不自动携带Bearer凭证。成功后仅清除提交开始时的旧本地凭证，提示使用新密码登录；失败保留原本的登录状态。其他设备的旧凭证在下次服务端认证时被拒绝。
+- 当前仍为Bearer请求头认证，没有改为Cookie认证。`localStorage`可被同源JavaScript读取；HTTPS及HttpOnly Cookie属于后续认证与部署强化工作。
 
 ## 2. 接口总览
 
@@ -87,6 +98,7 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 | POST | `/auth/email/code/register` | 公开 | 200 | 申请注册验证码 |
 | POST | `/auth/email/code/password-reset` | 公开 | 200 | 申请密码重置验证码 |
 | POST | `/auth/register` | 公开 | 201 | 校园邮箱注册 |
+| POST | `/auth/password-reset` | 公开 | 200 | 使用邮箱验证码设置新密码 |
 | POST | `/auth/login` | 公开 | 200 | 用户名密码登录 |
 | GET | `/auth/me` | Bearer | 200 | 查询当前用户 |
 | POST | `/auth/logout` | Bearer | 200 | 退出当前会话 |
@@ -146,9 +158,11 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 - 实际发送时仍可能返回验证码限流或邮件/Redis故障错误；当前实现不保证各种条件下的响应或耗时完全一致。
 - 基础参数校验及校园域名限制仍然生效；`USER_EMAIL_ALREADY_REGISTERED` 不用于此接口。
 
-目前没有提交新密码的接口，不能仅凭收到验证码完成密码重置。
+收到密码重置验证码后，可调用4.2的接口提交新密码；注册用途验证码不能用于该流程。
 
-## 4. 注册账号
+## 4. 注册与密码重置
+
+### 4.1 注册账号
 
 `POST /auth/register`，无需认证。
 
@@ -191,6 +205,63 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 | 409 | `USER_REGISTRATION_CONFLICT` | 并发注册触发唯一约束冲突 |
 | 429 | `AUTH_CODE_ATTEMPTS_EXCEEDED` | 当前验证码错误尝试达到上限 |
 | 503 | `AUTH_CODE_SERVICE_UNAVAILABLE` | 验证码校验服务暂不可用 |
+
+### 4.2 使用邮箱验证码设置新密码
+
+`POST /auth/password-reset`，无需登录或角色授权，须提供绑定邮箱的密码重置验证码。请求应省略 `Authorization`，重置不会自动登录。
+
+| 参数 | 类型 | 必填 | 默认规则 |
+| --- | --- | --- | --- |
+| `email` | string | 是 | 非空、有效校园邮箱；规范化后与申请验证码的绑定邮箱一致 |
+| `verificationCode` | string | 是 | 严格6位ASCII数字，保留前导零；仅接受密码重置用途 |
+| `newPassword` | string | 是 | 与注册密码规则一致：至少8个 Unicode 字符，UTF-8最多72字节，至少包含文字和数字，禁止控制字符；不执行 trim |
+
+```json
+{
+  "email": "student@std.uestc.edu.cn",
+  "verificationCode": "012345",
+  "newPassword": "NewExamplePassword2026"
+}
+```
+
+成功返回 HTTP 200，设置 `Cache-Control: no-store`，响应示例：
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "message": "请求成功",
+  "data": null,
+  "timestamp": "2026-10-28T02:00:00Z"
+}
+```
+
+重要副作用与失败处理：
+
+- 先检查邮箱和密码规则，再原子消费验证码；错误、过期、已消费或注册用途的验证码不能改密。成功消费后不可重放，并发使用同一验证码只能成功一次。
+- 只有邮箱已验证且状态为 `ACTIVE` 的已有账号能够重置。账号不存在、停用、锁定、删除或邮箱未验证时，统一返回 `AUTH_CODE_INVALID_OR_EXPIRED`，不恢复账号或公开具体状态。
+- 规范化后的邮箱必须精确等于账号绑定邮箱，不能利用MySQL重音不敏感比较规则，用另一个相似邮箱的验证码修改该账号。
+- 密码哈希、凭证版本和行版本在同一条SQL中更新。数据库提交后，所有重置前签发的登录凭证都会在后续认证时被拒绝；已通过认证的在途请求不会被追溯取消。
+- Redis中旧会话记录保留至原有效期自然清理，但不能继续通过最新凭证版本校验。无需逐个删除会话，也不增加数据库迁移。
+- 不修改邮箱、角色或账号状态，不自动清除登录失败锁定。重置后需用新密码重新登录；仍处于临时登录锁定期时须等待锁定结束。
+- 输入策略校验失败不消费验证码。验证码消费后的数据库故障或并发冲突不恢复验证码，须重新申请，并遵循已有发送冷却与配额。
+- 数据库更新核对读取时的邮箱、行版本、凭证版本及可用状态，拒绝覆盖计算密码哈希期间发生的账号变化。
+
+主要失败响应均采用1.1的统一格式，`data: null`，DTO校验错误除外：
+
+| HTTP | 错误码 | 含义 |
+| --- | --- | --- |
+| 400 | `COMMON_VALIDATION_FAILED` | 必填、邮箱格式或6位验证码格式不符，`data`包含字段错误 |
+| 400 | `USER_CAMPUS_EMAIL_REQUIRED` | 非允许校园邮箱 |
+| 400 | `USER_PASSWORD_WEAK` | 新密码不符合注册时的密码规则 |
+| 400 | `AUTH_CODE_INVALID_OR_EXPIRED` | 验证码错误、过期、已消费、用途不符，或账号不可用 |
+| 429 | `AUTH_CODE_ATTEMPTS_EXCEEDED` | 验证码错误尝试达到上限 |
+| 409 | `USER_PASSWORD_RESET_CONFLICT` | 消费验证码后账号发生并发变化，需重新申请验证码 |
+| 503 | `AUTH_CODE_SERVICE_UNAVAILABLE` | Redis验证码服务暂不可用，密码未修改 |
+| 503 | `USER_PASSWORD_RESET_UNAVAILABLE` | 验证码已消费后的账号读取或更新故障，需重新申请验证码 |
+| 401 | `AUTH_UNAUTHENTICATED` | 主动携带的Bearer令牌无效或已撤销，应省略认证头 |
+
+事务提交阶段等未被专门映射的基础设施错误仍可能返回500通用错误；失败不等于重置成功，也不保证验证码仍可用。
 
 ## 5. 用户名密码登录
 
@@ -357,8 +428,10 @@ Accept: application/json
 | 409 | `USER_EMAIL_ALREADY_REGISTERED` | 邮箱已经注册 |
 | 409 | `USER_USERNAME_ALREADY_REGISTERED` | 用户名已经使用 |
 | 400 | `USER_USERNAME_INVALID` | 用户名不符合规则 |
-| 400 | `USER_PASSWORD_WEAK` | 注册密码不符合规则 |
+| 400 | `USER_PASSWORD_WEAK` | 注册或重置的新密码不符合规则 |
 | 409 | `USER_REGISTRATION_CONFLICT` | 并发注册唯一约束冲突 |
+| 409 | `USER_PASSWORD_RESET_CONFLICT` | 改密时账号状态或版本发生并发变化 |
+| 503 | `USER_PASSWORD_RESET_UNAVAILABLE` | 验证码已消费后的账号读取或密码更新故障 |
 | 429 | `AUTH_CODE_RESEND_COOLDOWN` | 邮箱重发冷却中 |
 | 429 | `AUTH_CODE_EMAIL_RATE_LIMITED` | 邮箱发送次数超限 |
 | 400 | `AUTH_CODE_INVALID_OR_EXPIRED` | 验证码错误或已失效 |
@@ -406,7 +479,7 @@ $loginResult = $null
 
 ## 11. 尚未实现与维护要求
 
-尚未提供刷新令牌、提交新密码、列出设备、退出其他会话、餐厅和评价等业务接口。不要将计划中的路径作为现有API调用。
+尚未提供刷新令牌、列出设备、退出其他会话、餐厅和评价等业务接口。密码重置提交接口及前端找回密码页面已实现，尚未合并发布和完成真实邮件验收。不要将计划中的路径作为现有API调用。
 
 每次新增、修改或删除接口时同步更新本文，包括HTTP方法、路径、认证/角色要求、参数及默认规则、响应示例、状态码、错误码和重要副作用。接口行为以Controller、DTO、Service、安全配置及当前部署配置共同决定，不能只从Controller注解推断。
 
@@ -414,5 +487,6 @@ $loginResult = $null
 
 - [登录Controller](../backend/src/main/java/com/ginkgo/foodmap/security/controller/LoginController.java)、[登录Service](../backend/src/main/java/com/ginkgo/foodmap/security/service/LoginService.java)。
 - [注册Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/AuthController.java)、[验证码Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/AuthEmailCodeController.java)。
+- [密码重置Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/PasswordResetController.java)、[密码重置Service](../backend/src/main/java/com/ginkgo/foodmap/user/service/PasswordResetService.java)。
 - [安全配置](../backend/src/main/java/com/ginkgo/foodmap/security/SecurityConfiguration.java)、[统一响应](../backend/src/main/java/com/ginkgo/foodmap/common/api/ApiResponse.java)。
 - [默认配置](../backend/src/main/resources/application.yml)、[功能说明](features.md)、[开发记录](development.md)。

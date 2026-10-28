@@ -4,6 +4,12 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/password-reset',
+      name: 'password-reset',
+      component: () => import('@/pages/password-reset/PasswordResetPage.vue'),
+      meta: { title: '找回密码' },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/pages/login/LoginPage.vue'),

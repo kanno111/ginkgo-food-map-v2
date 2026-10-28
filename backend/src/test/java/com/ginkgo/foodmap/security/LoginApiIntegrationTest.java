@@ -5,6 +5,8 @@ import com.ginkgo.foodmap.security.service.LoginProtectionService;
 import com.ginkgo.foodmap.security.service.LoginSessionService;
 import com.ginkgo.foodmap.user.entity.UserEntity;
 import com.ginkgo.foodmap.user.mapper.UserMapper;
+import com.ginkgo.foodmap.user.domain.VerificationCodePurpose;
+import com.ginkgo.foodmap.user.service.VerificationCodeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +57,8 @@ class LoginApiIntegrationTest {
     @Autowired private AuthenticationProperties properties;
     @MockitoBean private LoginSessionService sessions;
     @MockitoBean private LoginProtectionService protection;
+    /** Redis 验证码原子性另由真实 Redis 集成测试验证，此处验证改密与真实认证链的联动。 */
+    @MockitoBean private VerificationCodeService codes;
     private final Map<String, String> activeSessions = new ConcurrentHashMap<>();
     private UserEntity user;
 
@@ -213,6 +217,83 @@ class LoginApiIntegrationTest {
                 .thenThrow(new RedisConnectionFailureException("test only"));
         mvc.perform(get("/auth/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("AUTH_SERVICE_UNAVAILABLE"));
+    }
+
+    /** 重置密码原子递增版本，两个设备的旧 JWT 同时失效，只有保留原样的新密码能够登录。 */
+    @Test
+    void shouldResetPasswordAndInvalidateAllPreviousLogins() throws Exception {
+        String first = login();
+        String second = login();
+        mvc.perform(post("/auth/password-reset").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"Student@STD.UESTC.EDU.CN","verificationCode":"012345",
+                                 "newPassword":" NewPassword2026 "}
+                                """))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.success").value(true)).andExpect(jsonPath("$.data").doesNotExist());
+        verify(codes).consume(VerificationCodePurpose.PASSWORD_RESET, "student@std.uestc.edu.cn", "012345");
+        UserEntity changed = users.selectById(user.getId());
+        assertThat(changed.getCredentialVersion()).isEqualTo(1L);
+        assertThat(changed.getRowVersion()).isEqualTo(1L);
+        assertThat(passwords.matches(" NewPassword2026 ", changed.getPasswordHash())).isTrue();
+        assertThat(passwords.matches("Ginkgo2026", changed.getPasswordHash())).isFalse();
+        // 旧会话记录仍在存储中，证明拒绝来自最新凭证版本，而非测试提前删除了会话。
+        assertThat(activeSessions).hasSize(2);
+        for (String token : List.of(first, second)) {
+            mvc.perform(get("/auth/me").header("Authorization", "Bearer " + token))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("AUTH_UNAUTHENTICATED"));
+        }
+        loginRequest().andExpect(status().isUnauthorized());
+        mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"ginkgo_user\",\"password\":\"NewPassword2026\"}"))
+                .andExpect(status().isUnauthorized());
+        String response = mvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"ginkgo_user\",\"password\":\" NewPassword2026 \"}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String freshToken = json.readTree(response).path("data").path("accessToken").asText();
+        mvc.perform(get("/auth/me").header("Authorization", "Bearer " + freshToken)).andExpect(status().isOk());
+    }
+
+    /** 只公开指定 POST，缺失字段、错误验证码形状或无效 Bearer 都不能执行重置。 */
+    @Test
+    void shouldValidatePasswordResetProtocolAndAuthentication() throws Exception {
+        mvc.perform(get("/auth/password-reset")).andExpect(status().isUnauthorized());
+        for (String payload : List.of("{}", """
+                {"email":"student@std.uestc.edu.cn","verificationCode":"12ab","newPassword":"NewPassword2026"}
+                """, """
+                {"email":"invalid","verificationCode":"012345","newPassword":"NewPassword2026"}
+                """, """
+                {"email":"student@std.uestc.edu.cn","verificationCode":"012345","newPassword":" "}
+                """)) {
+            mvc.perform(post("/auth/password-reset").contentType(MediaType.APPLICATION_JSON).content(payload))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("COMMON_VALIDATION_FAILED"));
+        }
+        mvc.perform(post("/auth/password-reset").header("Authorization", "Bearer invalid")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(codes);
+        assertThat(users.selectById(user.getId()).getCredentialVersion()).isZero();
+    }
+
+    /** 验证码服务拒绝或故障时，HTTP 保留业务错误码，密码和凭证版本均不变化。 */
+    @Test
+    void shouldPreservePasswordOnResetCodeFailure() throws Exception {
+        for (var error : List.of(com.ginkgo.foodmap.user.exception.VerificationCodeErrorCode.INVALID_OR_EXPIRED,
+                com.ginkgo.foodmap.user.exception.VerificationCodeErrorCode.ATTEMPTS_EXCEEDED,
+                com.ginkgo.foodmap.user.exception.VerificationCodeErrorCode.SERVICE_UNAVAILABLE)) {
+            doThrow(new com.ginkgo.foodmap.common.exception.BusinessException(error)).when(codes)
+                    .consume(VerificationCodePurpose.PASSWORD_RESET, "student@std.uestc.edu.cn", "012345");
+            mvc.perform(post("/auth/password-reset").contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"email":"student@std.uestc.edu.cn","verificationCode":"012345",
+                                     "newPassword":"NewPassword2026"}
+                                    """))
+                    .andExpect(status().is(error.getHttpStatus().value()))
+                    .andExpect(jsonPath("$.code").value(error.getCode()));
+        }
+        assertThat(users.selectById(user.getId()).getPasswordHash()).isEqualTo(user.getPasswordHash());
+        assertThat(users.selectById(user.getId()).getCredentialVersion()).isZero();
+        verifyNoInteractions(sessions);
     }
 
     private org.springframework.test.web.servlet.ResultActions loginRequest() throws Exception {

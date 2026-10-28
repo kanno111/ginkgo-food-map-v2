@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ginkgo.foodmap.user.entity.UserEntity;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.Optional;
 
@@ -15,6 +17,26 @@ import java.util.Optional;
  */
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
+
+    /**
+     * 在同一 SQL 中替换密码并递增凭证版本和行版本，避免改密与旧令牌失效分两步执行。
+     *
+     * <p>只更新密码相关列，且显式比较读取时的两个版本、邮箱和可登录状态。此自定义 SQL 不依赖
+     * MyBatis-Plus 的实体乐观锁拦截器，返回0表示账号已变化，调用方必须拒绝并要求重新获取验证码。</p>
+     *
+     * @return 成功为1，账号并发变化或不可用为0
+     */
+    @Update("""
+            UPDATE users
+            SET password_hash = #{passwordHash}, credential_version = credential_version + 1,
+                row_version = row_version + 1, updated_at = CURRENT_TIMESTAMP(6)
+            WHERE id = #{userId} AND email = #{email} AND row_version = #{rowVersion}
+                AND credential_version = #{credentialVersion} AND status = 'ACTIVE' AND email_verified = TRUE
+            """)
+    int resetPasswordIfCurrent(@Param("userId") long userId, @Param("email") String email,
+                               @Param("rowVersion") long rowVersion,
+                               @Param("credentialVersion") long credentialVersion,
+                               @Param("passwordHash") String passwordHash);
 
     /**
      * 按规范化用户名查询用户。
