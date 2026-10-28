@@ -86,4 +86,38 @@ describe('restaurant catalog preview', () => {
     store.goToPage(NaN)
     expect(store.page).toBe(1)
   })
+
+  it('collapses advanced controls without losing their conditions and resets the summary', async () => {
+    const toggle = host.querySelector<HTMLButtonElement>('.mobile-filter-toggle')!
+    const panel = host.querySelector('#advanced-filters')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    toggle.click()
+    await nextTick()
+    expect(panel.classList.contains('expanded')).toBe(true)
+    const category = [...host.querySelectorAll<HTMLButtonElement>('.category-filter button')].find(
+      (button) => button.textContent?.trim() === '火锅',
+    )!
+    category.click()
+    await nextTick()
+    expect(toggle.textContent).toContain('已选 1 项')
+    toggle.click()
+    await nextTick()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(panel.classList.contains('expanded')).toBe(false)
+    expect(host.querySelectorAll('.restaurant-card')).toHaveLength(4)
+    host.querySelector<HTMLButtonElement>('.filter-title button')!.click()
+    await nextTick()
+    expect(toggle.textContent).not.toContain('已选')
+    expect(host.querySelectorAll('.restaurant-card')).toHaveLength(8)
+  })
+
+  it('moves keyboard focus to the result summary after pagination', async () => {
+    const nextPage = [
+      ...host.querySelectorAll<HTMLButtonElement>('.catalog-pagination button'),
+    ].find((button) => button.textContent?.includes('下一页'))!
+    nextPage.click()
+    await nextTick()
+    expect(useRestaurantCatalog(pinia).page).toBe(2)
+    expect(document.activeElement).toBe(host.querySelector('.results-toolbar'))
+  })
 })

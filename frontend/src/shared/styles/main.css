@@ -48,13 +48,14 @@ button:disabled {
   text-decoration: none;
 }
 .brand-mark {
-  width: 42px;
-  height: 42px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 14px;
-  color: #fff;
-  background: #2b2a26;
+  border-radius: 10px;
+  border: 1px solid #f0dfb2;
+  background: #fdf3da;
   font-weight: 800;
 }
 .brand strong,

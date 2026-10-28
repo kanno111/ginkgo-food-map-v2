@@ -5,7 +5,7 @@ import type {
   RestaurantReadModel,
 } from './restaurant.types'
 
-/** 杯型定义沿用原版阈值；空分数单独处理，不能把未评价当成踩雷。 */
+/** 阈值、颜色与标语逐项沿用原版 TIERS/TIER_NONE；待评级不能当成踩雷。 */
 export const cupTiers: {
   key: CupTier
   label: string
@@ -17,19 +17,19 @@ export const cupTiers: {
     key: 'bucket',
     label: '全家桶',
     range: '8.6–10',
-    color: '#b94c38',
-    description: '值得专程奔赴',
+    color: '#C0392B',
+    description: '神店，冲',
   },
-  { key: 'super', label: '超大杯', range: '7.4–8.6', color: '#a66c30', description: '想再来一次' },
-  { key: 'large', label: '大杯', range: '6.2–7.4', color: '#b78651', description: '值得认真尝尝' },
-  { key: 'medium', label: '中杯', range: '5.0–6.2', color: '#9d8a67', description: '日常的一餐' },
-  { key: 'small', label: '小杯', range: '0–5.0', color: '#7c8793', description: '看看评价再决定' },
+  { key: 'super', label: '超大杯', range: '7.4–8.6', color: '#B5651D', description: '强推' },
+  { key: 'large', label: '大杯', range: '6.2–7.4', color: '#C98A4B', description: '值得一去' },
+  { key: 'medium', label: '中杯', range: '5.0–6.2', color: '#D8B98A', description: '中规中矩' },
+  { key: 'small', label: '小杯', range: '0–5.0', color: '#8A94A6', description: '踩雷预警' },
   {
     key: 'none',
     label: '待评级',
     range: '暂无评价',
-    color: '#8a8679',
-    description: '等待真实的第一口',
+    color: '#B9B2A4',
+    description: '等你来评',
   },
 ]
 

@@ -14,7 +14,26 @@ defineEmits<{ logout: []; retry: [] }>()
 <template>
   <header class="topbar">
     <RouterLink class="brand" to="/" aria-label="返回首页">
-      <span class="brand-mark" aria-hidden="true">杏</span>
+      <!-- 原版页头杯型的精确路径；共享布局不依赖业务模块。 -->
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="19" height="19" focusable="false">
+          <path
+            d="M6.2 8.4h11.6l-1.35 10.2H7.55Z"
+            fill="#E9B949"
+            stroke="#2B2A26"
+            stroke-width="1.4"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M17.1 10.4h1.35a2.15 2.15 0 0 1 0 4.3h-1.1"
+            fill="none"
+            stroke="#2B2A26"
+            stroke-width="1.4"
+            stroke-linecap="round"
+          />
+          <path d="M4.9 5.6h14.2" stroke="#2B2A26" stroke-width="1.7" stroke-linecap="round" />
+        </svg>
+      </span>
       <span>
         <strong>Ginkgo 美食地图</strong>
         <small>Ginkgo 烹饪社</small>

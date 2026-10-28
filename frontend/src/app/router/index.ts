@@ -44,7 +44,8 @@ const router = createRouter({
       redirect: '/',
     },
   ],
-  scrollBehavior: () => ({ top: 0 }),
+  // 浏览器前进/后退恢复列表阅读位置，普通跳转仍从新页面顶部开始。
+  scrollBehavior: (_to, _from, savedPosition) => savedPosition ?? { top: 0 },
 })
 
 // 单页应用切换路由时同步浏览器标题，便于用户识别当前页面。

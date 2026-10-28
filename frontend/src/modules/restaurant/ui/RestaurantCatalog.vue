@@ -1,20 +1,37 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import { useRestaurantCatalog } from '../model/catalog.store'
 import { cupTiers } from '../model/catalog.logic'
 import CupBadge from './CupBadge.vue'
 import RestaurantCard from './RestaurantCard.vue'
 
 const catalog = useRestaurantCatalog()
+// 折叠只改变展示，不清除条件；筛选与页码仍由目录状态保留。
+const filtersExpanded = ref(false)
+const advancedCount = computed(
+  () =>
+    Number(Boolean(catalog.filters.category)) +
+    Number(catalog.filters.view !== 'all') +
+    Number(catalog.filters.hideClosed),
+)
+const resultsHeading = useTemplateRef('resultsHeading')
+
+/** 翻页后返回结果栏，键盘和手机用户无需手动滚回列表顶部。 */
+async function changePage(page: number): Promise<void> {
+  catalog.goToPage(page)
+  await nextTick()
+  resultsHeading.value?.focus({ preventScroll: true })
+  resultsHeading.value?.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+}
 </script>
 
 <template>
   <section id="restaurant-directory" class="restaurant-directory" aria-labelledby="directory-title">
     <div class="directory-heading">
       <div>
-        <p class="eyebrow">THE FOOD DIRECTORY</p>
-        <h2 id="directory-title">下一顿，从这里出发。</h2>
+        <h2 id="directory-title">餐厅目录</h2>
       </div>
-      <RouterLink class="guide-link" to="/scoring-guide">一只杯子，怎么看？ ↗</RouterLink>
+      <RouterLink class="guide-link" to="/scoring-guide">杯型评分说明 →</RouterLink>
     </div>
     <div class="preview-notice" role="note">
       <span class="preview-label">目录预览</span>
@@ -23,51 +40,64 @@ const catalog = useRestaurantCatalog()
     <div class="directory-layout">
       <aside class="directory-filters" aria-label="餐厅筛选">
         <div class="filter-title">
-          <h3>找到你的口味</h3>
+          <h3>筛选餐厅</h3>
           <button type="button" @click="catalog.resetFilters">重置</button>
         </div>
-        <label class="field-label" for="restaurant-search">搜一家店，或一种味道</label>
+        <label class="field-label" for="restaurant-search">搜索餐厅</label>
         <div class="search-field">
           <span aria-hidden="true">⌕</span
           ><input
             id="restaurant-search"
             v-model="catalog.filters.keyword"
             type="search"
+            aria-label="搜索餐厅"
             placeholder="店名、地址、标签…"
             maxlength="100"
           />
         </div>
-        <fieldset class="category-filter">
-          <legend>今天想吃</legend>
-          <button
-            type="button"
-            :aria-pressed="catalog.filters.category === ''"
-            @click="catalog.filters.category = ''"
-          >
-            全部分类
-          </button>
-          <button
-            v-for="category in catalog.categories"
-            :key="category"
-            type="button"
-            :aria-pressed="catalog.filters.category === category"
-            @click="catalog.filters.category = category"
-          >
-            {{ category }}
-          </button>
-        </fieldset>
-        <label class="field-label" for="restaurant-view">只看这些</label>
-        <select id="restaurant-view" v-model="catalog.filters.view">
-          <option value="all">全部餐厅</option>
-          <option value="recommended">推荐 · 大杯及以上</option>
-          <option value="pitfall">踩雷 · 小杯</option>
-        </select>
-        <label class="closed-filter"
-          ><input v-model="catalog.filters.hideClosed" type="checkbox" />隐藏原版标注停业的店</label
+        <button
+          class="mobile-filter-toggle"
+          type="button"
+          :aria-expanded="filtersExpanded"
+          aria-controls="advanced-filters"
+          @click="filtersExpanded = !filtersExpanded"
         >
-        <div class="filter-footnote">
-          <span aria-hidden="true">✳</span>
-          <p>分数由真实体验长出来。<br />没有评价，也值得被发现。</p>
+          {{ filtersExpanded ? '收起筛选' : '更多筛选'
+          }}<span v-if="advancedCount">（已选 {{ advancedCount }} 项）</span>
+          <span aria-hidden="true">{{ filtersExpanded ? ' −' : ' +' }}</span>
+        </button>
+        <div id="advanced-filters" class="advanced-filters" :class="{ expanded: filtersExpanded }">
+          <fieldset class="category-filter">
+            <legend>今天想吃</legend>
+            <button
+              type="button"
+              :aria-pressed="catalog.filters.category === ''"
+              @click="catalog.filters.category = ''"
+            >
+              全部分类
+            </button>
+            <button
+              v-for="category in catalog.categories"
+              :key="category"
+              type="button"
+              :aria-pressed="catalog.filters.category === category"
+              @click="catalog.filters.category = category"
+            >
+              {{ category }}
+            </button>
+          </fieldset>
+          <label class="field-label" for="restaurant-view">只看这些</label>
+          <select id="restaurant-view" v-model="catalog.filters.view">
+            <option value="all">全部餐厅</option>
+            <option value="recommended">推荐 · 大杯及以上</option>
+            <option value="pitfall">踩雷 · 小杯</option>
+          </select>
+          <label class="closed-filter"
+            ><input
+              v-model="catalog.filters.hideClosed"
+              type="checkbox"
+            />隐藏原版标注停业的店</label
+          >
         </div>
       </aside>
       <div class="directory-content">
@@ -84,12 +114,13 @@ const catalog = useRestaurantCatalog()
             :key="tier.key"
             type="button"
             :aria-pressed="catalog.filters.tiers.includes(tier.key)"
+            :title="tier.description"
             @click="catalog.toggleTier(tier.key)"
           >
-            {{ tier.label }}
+            <CupBadge :tier="tier.key" compact />
           </button>
         </div>
-        <div class="results-toolbar">
+        <div ref="resultsHeading" class="results-toolbar" tabindex="-1" aria-label="餐厅筛选结果">
           <p role="status" aria-live="polite">
             找到 <strong>{{ catalog.results.length }}</strong> 家候选店铺<span
               v-if="catalog.results.length"
@@ -138,7 +169,7 @@ const catalog = useRestaurantCatalog()
           <button
             type="button"
             :disabled="catalog.page === 1"
-            @click="catalog.goToPage(catalog.page - 1)"
+            @click="changePage(catalog.page - 1)"
           >
             ← 上一页
           </button>
@@ -148,14 +179,14 @@ const catalog = useRestaurantCatalog()
             type="button"
             :aria-current="catalog.page === page ? 'page' : undefined"
             :aria-label="`第 ${page} 页`"
-            @click="catalog.goToPage(page)"
+            @click="changePage(page)"
           >
             {{ page }}
           </button>
           <button
             type="button"
             :disabled="catalog.page === catalog.pages"
-            @click="catalog.goToPage(catalog.page + 1)"
+            @click="changePage(catalog.page + 1)"
           >
             下一页 →
           </button>
@@ -174,12 +205,12 @@ const catalog = useRestaurantCatalog()
   justify-content: space-between;
   align-items: flex-end;
   gap: 20px;
-  margin-bottom: 26px;
+  margin-bottom: 14px;
 }
 h2 {
-  margin: 8px 0 0;
+  margin: 0;
   font-family: Georgia, 'Songti SC', serif;
-  font-size: clamp(28px, 4vw, 40px);
+  font-size: 22px;
   font-weight: 600;
 }
 .guide-link {
@@ -192,8 +223,8 @@ h2 {
   display: flex;
   gap: 14px;
   align-items: center;
-  padding: 14px 18px;
-  margin-bottom: 28px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
   border: 1px solid #e9dbb5;
   border-radius: 12px;
   background: #f7f0df;
@@ -226,7 +257,7 @@ h2 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 26px;
+  margin-bottom: 12px;
 }
 .filter-title h3 {
   margin: 0;
@@ -235,6 +266,10 @@ h2 {
 button {
   cursor: pointer;
   font: inherit;
+  min-height: 44px;
+}
+.mobile-filter-toggle {
+  display: none;
 }
 .filter-title button {
   border: 0;
@@ -307,6 +342,7 @@ legend {
 }
 select {
   width: 100%;
+  min-height: 44px;
   min-width: 0;
   padding: 10px;
   border: 1px solid #ddd3bf;
@@ -318,7 +354,8 @@ select {
 }
 .closed-filter {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  min-height: 44px;
   gap: 6px;
   margin-top: 18px;
   font-size: 12px;
@@ -329,19 +366,6 @@ select {
   margin: 2px 0 0;
   accent-color: #676b49;
 }
-.filter-footnote {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid #e1d7c3;
-  color: #8b7d60;
-}
-.filter-footnote > span {
-  font-size: 26px;
-}
-.filter-footnote p {
-  font-size: 12px;
-  line-height: 1.9;
-}
 .directory-content {
   min-width: 0;
 }
@@ -351,7 +375,7 @@ select {
   gap: 7px;
 }
 .tier-filters button {
-  padding: 8px 12px;
+  padding: 5px;
   border: 1px solid #e3dbcc;
   border-radius: 999px;
   background: transparent;
@@ -359,6 +383,8 @@ select {
   color: #7b705b;
 }
 .tier-filters button[aria-pressed='true'] {
+  outline: 2px solid #8a6c26;
+  outline-offset: 1px;
   border-color: #c9b47d;
   background: #ede3c9;
   color: #6c541b;
@@ -368,7 +394,8 @@ select {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  margin: 24px 0 20px;
+  margin: 16px 0;
+  scroll-margin-top: 16px;
 }
 .results-toolbar p {
   margin: 0;
@@ -454,29 +481,77 @@ select {
     grid-template-columns: 1fr;
   }
   .directory-filters {
-    padding: 20px;
+    padding: 10px 12px;
   }
   .filter-title {
-    margin-bottom: 18px;
+    margin-bottom: 0;
+  }
+  .filter-title h3,
+  .directory-filters > .field-label {
+    display: none;
+  }
+  .directory-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 0 10px;
+  }
+  .filter-title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .search-field {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 44px;
+  }
+  .mobile-filter-toggle,
+  .advanced-filters {
+    grid-column: 1 / -1;
+  }
+  .mobile-filter-toggle {
+    display: block;
+    padding: 6px 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: #625841;
+  }
+  .advanced-filters {
+    display: none;
+  }
+  .advanced-filters.expanded {
+    display: block;
   }
   fieldset {
     margin: 20px 0;
   }
-  .filter-footnote {
-    display: none;
-  }
   .directory-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 16px;
+    align-items: center;
+    gap: 12px;
   }
   .preview-notice {
     align-items: flex-start;
-    flex-direction: column;
-    gap: 6px;
+    gap: 10px;
   }
   .results-toolbar {
     align-items: flex-start;
+  }
+  .guide-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .tier-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 3px;
+    margin: -3px;
+  }
+  .tier-filters button {
+    flex: 0 0 auto;
+  }
+  .directory-layout {
+    gap: 14px;
   }
 }
 </style>

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { CupBadge, cupTiers, ratingDimensions } from '@/modules/restaurant'
+import cover from '@/shared/assets/ginkgo-cover.jpg'
 </script>
 
 <template>
   <article class="scoring-guide" aria-labelledby="guide-title">
     <RouterLink class="guide-back" to="/">← 返回餐厅目录</RouterLink>
     <header class="guide-heading">
-      <p class="eyebrow">THE GINKGO SCALE</p>
-      <h1 id="guide-title">一口一杯，认真评价。</h1>
-      <p>没有标准答案，只有真实体验。<br />把一餐的感受，分成四个维度慢慢说。</p>
+      <h1 id="guide-title">评分说明</h1>
+      <p>吃了就打分，按杯型论英雄——不好吃就举牌子。</p>
     </header>
     <section class="dimension-guide" aria-label="四维评分">
       <div v-for="(dimension, index) in ratingDimensions" :key="dimension.key">
@@ -18,7 +18,7 @@ import { CupBadge, cupTiers, ratingDimensions } from '@/modules/restaurant'
       </div>
     </section>
     <section class="tier-guide" aria-labelledby="tiers-title">
-      <h2 id="tiers-title">五档杯型，和一份等待。</h2>
+      <h2 id="tiers-title">杯型与评分</h2>
       <p>每项 0–10 分，步进 0.5。杯型由真实评价的综合分计算。</p>
       <div class="guide-table">
         <div v-for="tier in cupTiers" :key="tier.key" class="tier-row">
@@ -42,12 +42,19 @@ import { CupBadge, cupTiers, ratingDimensions } from '@/modules/restaurant'
       <p>0 分是有效评分；没有评价则是“待评级”。只有一条评价的高分，也请结合评价数量和正文判断。</p>
     </section>
     <section class="community-note">
-      <span aria-hidden="true">✳</span>
-      <h2>分享体验，也保留善意。</h2>
+      <!-- 与原版帮助页共用封面和社团说明，避免另造品牌口号。 -->
+      <img
+        :src="cover"
+        width="140"
+        height="140"
+        loading="lazy"
+        alt="社团封面：白色兔子举着「辣鸡！」的牌子"
+      />
       <p>
-        只评价自己真正吃过的餐厅，写下菜品、消费和具体感受。<br />不刷分、不发广告，不发布他人隐私或人身攻击。
+        这张封面是社团的传家宝：<b>吃到难吃的，就举牌子。</b
+        ><br />本榜单是社团内部测评，不是商业榜单，也不接推广。
       </p>
-      <RouterLink class="primary-action" to="/">回去找点好吃的 ↗</RouterLink>
+      <RouterLink class="primary-action" to="/">返回餐厅目录</RouterLink>
     </section>
   </article>
 </template>
@@ -165,13 +172,8 @@ li,
   margin-top: 45px;
   padding: 30px 0;
 }
-.community-note > span {
-  color: #989562;
-  font-size: 40px;
-}
-.community-note h2 {
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 30px;
+.community-note img {
+  border-radius: 12px;
 }
 .community-note p {
   color: #7e6a4d;
