@@ -10,28 +10,44 @@ const distance = computed(() => campusDistance(props.restaurant))
 
 <template>
   <RouterLink class="restaurant-card" :to="`/restaurants/${encodeURIComponent(restaurant.id)}`">
-    <div class="card-top">
-      <span class="category-label">{{ restaurant.category }}</span>
-      <CupBadge :tier="tierOf(restaurant.score)" compact />
+    <div class="catalog-photo-placeholder" aria-label="暂无同学上传照片">
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path
+          d="M12 28h40c-2 17-9 22-20 22S14 45 12 28Zm7 27h26M25 10v10m9-12v12m9-10v10"
+          stroke="currentColor"
+          stroke-width="3"
+          stroke-linecap="round"
+        /></svg
+      ><small>暂无同学上传照片</small>
     </div>
-    <h3>{{ restaurant.name }}<span class="card-arrow" aria-hidden="true">↗</span></h3>
-    <p class="card-address">{{ restaurant.address || '地址待补充' }}</p>
-    <div class="tag-list">
-      <span v-for="tag in restaurant.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
-    </div>
-    <div class="card-meta">
-      <span class="card-price"
-        >{{ priceLabel(restaurant)
-        }}<small v-if="restaurant.priceKind === 'estimate'"> / 人 · 估值</small></span
-      >
-      <span>{{ distance === null ? '位置待补' : `距校区 ${distance.toFixed(1)} km` }}</span>
-    </div>
-    <div class="card-foot">
-      <span>{{
-        restaurant.reviewCount ? `${restaurant.reviewCount} 条评价` : '等待第一条真实评价'
-      }}</span>
-      <span v-if="restaurant.closed" class="closed-label">标注停业</span>
-      <span v-else>查看详情 <span aria-hidden="true">→</span></span>
+    <div class="card-copy">
+      <div class="card-top">
+        <span class="category-label">{{ restaurant.category }}</span>
+        <CupBadge :tier="tierOf(restaurant.score)" compact />
+      </div>
+      <h3>{{ restaurant.name }}<span class="card-arrow" aria-hidden="true">↗</span></h3>
+      <p class="card-rating">
+        {{ restaurant.score === null ? '待评级' : `${restaurant.score.toFixed(1)}分` }}
+        <small>· {{ restaurant.reviewCount }} 条评价</small>
+      </p>
+      <p class="card-address">{{ restaurant.address || '地址待补充' }}</p>
+      <div class="tag-list">
+        <span v-for="tag in restaurant.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
+      </div>
+      <div class="card-meta">
+        <span class="card-price"
+          >{{ priceLabel(restaurant)
+          }}<small v-if="restaurant.priceKind === 'estimate'"> / 人 · 估值</small></span
+        >
+        <span>{{ distance === null ? '位置待补' : `距校区 ${distance.toFixed(1)} km` }}</span>
+      </div>
+      <div class="card-foot">
+        <span>{{
+          restaurant.reviewCount ? `${restaurant.reviewCount} 条评价` : '等待第一条真实评价'
+        }}</span>
+        <span v-if="restaurant.closed" class="closed-label">标注停业</span>
+        <span v-else>查看详情 <span aria-hidden="true">→</span></span>
+      </div>
     </div>
   </RouterLink>
 </template>
@@ -134,6 +150,109 @@ h3 {
 @media (max-width: 480px) {
   .restaurant-card {
     padding: 20px;
+  }
+}
+
+.restaurant-card {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  background: white;
+  align-items: start;
+}
+.catalog-photo-placeholder {
+  border-radius: 12px;
+  background: #f7f0e1;
+  color: #a79677;
+  min-height: 132px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: 8px;
+}
+.catalog-photo-placeholder svg {
+  width: 52px;
+  height: 52px;
+  margin: auto;
+}
+.catalog-photo-placeholder small {
+  font-size: 10px;
+  margin-top: 10px;
+}
+.card-copy {
+  min-width: 0;
+}
+.card-top {
+  gap: 8px;
+}
+.category-label {
+  letter-spacing: 0;
+}
+.card-rating {
+  font-size: 20px;
+  font-weight: 700;
+  color: #bb7a16;
+  margin: 8px 0;
+}
+.card-rating small {
+  font-size: 11px;
+  font-weight: 400;
+  color: #7d735f;
+}
+h3 {
+  margin: 8px 0 4px;
+  font-size: 19px;
+}
+.card-price {
+  font-size: 15px;
+}
+.tag-list {
+  margin: 8px 0;
+  gap: 4px;
+}
+.tag-list span {
+  font-size: 10px;
+  padding: 3px 5px;
+}
+.card-foot {
+  padding-top: 8px;
+  margin-top: 10px;
+  gap: 5px;
+  font-size: 10px;
+}
+.card-meta {
+  gap: 5px;
+  font-size: 11px;
+}
+.card-address {
+  font-size: 11px;
+}
+@media (max-width: 480px) {
+  .restaurant-card {
+    grid-template-columns: 86px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+  .catalog-photo-placeholder {
+    min-height: 112px;
+    padding: 5px;
+  }
+  .catalog-photo-placeholder small {
+    font-size: 9px;
+  }
+  h3 {
+    font-size: 16px;
+  }
+  .card-top :deep(.cup-badge) {
+    font-size: 10px;
+  }
+  .card-foot {
+    flex-wrap: wrap;
+  }
+  .card-price small {
+    font-size: 10px;
   }
 }
 </style>

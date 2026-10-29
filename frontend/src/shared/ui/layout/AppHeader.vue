@@ -35,11 +35,12 @@ defineEmits<{ logout: []; retry: [] }>()
         </svg>
       </span>
       <span>
-        <strong>Ginkgo 美食地图</strong>
+        <strong><em>Ginkgo</em> 美食地图</strong>
         <small>Ginkgo 烹饪社</small>
       </span>
     </RouterLink>
 
+    <span class="campus-label">⌖ 清水河校区</span>
     <nav aria-label="主要导航">
       <RouterLink to="/">发现美食</RouterLink>
       <RouterLink to="/scoring-guide">评分说明</RouterLink>
@@ -61,3 +62,36 @@ defineEmits<{ logout: []; retry: [] }>()
     <button v-if="hasSession && !authenticated" type="button" @click="$emit('retry')">重试</button>
   </div>
 </template>
+
+<style scoped>
+.brand em {
+  color: #f39a08;
+  font-size: 24px;
+  font-style: normal;
+  font-weight: 850;
+}
+.campus-label {
+  margin-left: auto;
+  margin-right: 28px;
+  font-size: 13px;
+  color: #7d7464;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .brand-mark,
+  .brand small,
+  .topbar nav {
+    display: none;
+  }
+  .brand strong {
+    font-size: 15px;
+  }
+  .brand em {
+    font-size: 23px;
+  }
+  .campus-label {
+    margin: 0;
+    font-size: 12px;
+  }
+}
+</style>

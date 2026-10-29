@@ -21,10 +21,13 @@ async function handleSubmit() {
   const success = await auth.submit({ username: form.username.trim(), password: form.password })
   form.password = ''
   if (success) {
-    // 仅允许本站餐厅路由回跳，不能把外部URL、协议相对地址或其他查询当作跳转目标。
+    // 只允许餐厅路径和首页写评标记；外部URL、协议相对地址和其他查询不能成为跳转目标。
     const target = route.query.redirect
     const safeTarget =
-      typeof target === 'string' && /^\/restaurants\/(?:new|[1-9]\d*(?:\/edit)?)$/.test(target)
+      typeof target === 'string' &&
+      /^(?:\/\?writeReview=1|\/restaurants\/(?:new|[1-9]\d*(?:\/edit)?)(?:\?writeReview=1)?)$/.test(
+        target,
+      )
     await router.replace(safeTarget ? target : '/')
   }
 }

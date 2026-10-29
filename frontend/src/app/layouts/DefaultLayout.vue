@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import AppHeader from '@/shared/ui/layout/AppHeader.vue'
+import BottomNavigation from '@/shared/ui/layout/BottomNavigation.vue'
 import { useLoginStore } from '@/modules/auth'
 
+import { useRoute } from 'vue-router'
+const route = useRoute()
 const auth = useLoginStore()
 </script>
 
@@ -20,5 +23,9 @@ const auth = useLoginStore()
     <main>
       <RouterView />
     </main>
+    <BottomNavigation
+      v-if="!/^\/restaurants\/\d+$/.test(route.path)"
+      :authenticated="auth.authenticated"
+    />
   </div>
 </template>

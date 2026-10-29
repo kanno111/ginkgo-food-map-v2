@@ -59,7 +59,7 @@ describe('original Ginkgo brand parity', () => {
     },
   )
 
-  it('shows the original hero copy, cover caption and tier slogans', async () => {
+  it('uses the approved restaurant-first layout and retains brand assets', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -74,16 +74,10 @@ describe('original Ginkgo brand parity', () => {
     app = createApp(HomePage).use(pinia).use(router)
     app.mount(host)
     expect(host.querySelector('h1')?.textContent).toBe('Ginkgo 美食地图')
-    expect(host.querySelector('.hero-description')?.textContent?.trim()).toBe(
-      '电子科技大学 Ginkgo 烹饪社 · 成都觅食指南。吃了就打分，按杯型论英雄——不好吃就举牌子。',
-    )
-    expect(host.querySelector('.eyebrow')?.textContent?.trim()).toBe(
-      'UNIVERSITY OF ELECTRONIC SCIENCE AND TECHNOLOGY OF CHINA',
-    )
-    expect(host.querySelector('.hero-cover figcaption')?.textContent).toBe('不好吃，就举牌子。')
-    expect(host.querySelector('.hero-cover img')?.getAttribute('src')).toContain('ginkgo-cover.jpg')
-    expect(
-      [...host.querySelectorAll('.invitation-cups small')].map((element) => element.textContent),
-    ).toEqual(['神店，冲', '强推', '值得一去', '中规中矩', '踩雷预警'])
+    expect(host.querySelector('.discovery-footer figcaption')?.textContent).toBe('不好吃，就举牌子。')
+    expect(host.querySelector('.discovery-footer img')?.getAttribute('src')).toContain('ginkgo-cover.jpg')
+    expect(host.querySelector('.random-banner')?.textContent).toContain('今天吃什么')
+    expect(host.textContent).not.toContain('看点评')
+
   })
 })

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import axios from 'axios'
+import { ReviewComposer, ReviewPanel, ScoreRadar } from '@/modules/review'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { toErrorMessage } from '@/shared/lib/toErrorMessage'
 import { fetchRestaurant } from '../api/restaurantApi'
 import type { RestaurantReadModel } from '../model/restaurant.types'
-import { campusDistance, priceLabel, ratingDimensions, tierOf } from '../model/catalog.logic'
+import { campusDistance, priceLabel, tierOf } from '../model/catalog.logic'
 import CupBadge from './CupBadge.vue'
 import RestaurantManagementActions from './RestaurantManagementActions.vue'
 
@@ -122,15 +123,30 @@ function shareRestaurant(): void {
         </p>
       </div>
       <div class="detail-cup">
-        <CupBadge :tier="tierOf(restaurant.score)" /><small>等待真实的第一口</small>
+        <CupBadge :tier="tierOf(restaurant.score)" /><small>{{
+          restaurant.reviewCount ? '根据学生点评计算' : '等待真实的第一口'
+        }}</small>
       </div>
     </section>
+    <p class="detail-location">
+      ⌖ {{ restaurant.address || '地址待补充'
+      }}<span>
+        {{
+          distance === null ? '位置尚未确认' : '距清水河校区约 ' + distance.toFixed(1) + ' km'
+        }}</span
+      >
+    </p>
     <RestaurantManagementActions :id="restaurant.id" :key="restaurant.id" />
+    <div class="detail-actions">
+      <button type="button" @click="copyText(restaurant.address || restaurant.name)">
+        复制地址</button
+      ><ReviewComposer :restaurant="restaurant" @published="loadDetail" />
+    </div>
     <div class="detail-layout">
       <div class="detail-main">
         <section class="detail-panel" aria-labelledby="score-title">
           <div class="panel-heading">
-            <h2 id="score-title">把感受，分成四份。</h2>
+            <h2 id="score-title">四维评分</h2>
             <RouterLink to="/scoring-guide">评分说明 ↗</RouterLink>
           </div>
           <dl class="score-summary">
@@ -149,30 +165,14 @@ function shareRestaurant(): void {
               </dd>
             </div>
             <div>
-              <dt>真实评价</dt>
+              <dt>学生点评</dt>
               <dd>{{ restaurant.reviewCount }}<small> 条</small></dd>
             </div>
           </dl>
-          <dl class="dimension-list">
-            <div v-for="dimension in ratingDimensions" :key="dimension.key">
-              <dt>{{ dimension.label }}</dt>
-              <dd>{{ restaurant.dimensions[dimension.key]?.toFixed(1) ?? '暂无评分' }}</dd>
-            </div>
-          </dl>
+          <ScoreRadar :dimensions="restaurant.dimensions" />
           <p class="panel-note">没有评价的店显示“待评级”，不等于低分。杯型会根据真实评价计算。</p>
         </section>
-        <section class="detail-panel review-placeholder" aria-labelledby="reviews-title">
-          <div class="panel-heading">
-            <h2 id="reviews-title">吃过的人，怎么说。</h2>
-            <span>{{ restaurant.reviewCount }} 条评价</span>
-          </div>
-          <div class="review-empty">
-            <CupBadge tier="none" />
-            <h3>好味道，等真实的故事。</h3>
-            <p>暂不支持发布评价或上传照片。</p>
-            <RouterLink to="/scoring-guide">先了解如何认真评价 →</RouterLink>
-          </div>
-        </section>
+        <ReviewPanel :key="restaurant.id" :restaurant-id="restaurant.id" @changed="loadDetail" />
       </div>
       <aside class="detail-aside" aria-label="餐厅基本信息">
         <section class="address-panel">
@@ -228,308 +228,273 @@ function shareRestaurant(): void {
 </template>
 
 <style scoped>
+/* 详情不设封面，照片归属点评；底栏预留安全区域。 */
 .restaurant-detail {
   width: min(1100px, calc(100% - 40px));
-  margin: 0 auto;
-  padding: 30px 0 80px;
+  margin: auto;
+  padding: 22px 0 32px;
 }
 .detail-breadcrumb {
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   font-size: 12px;
-  color: #77674f;
+  color: #7e7566;
 }
-.detail-breadcrumb a {
+a {
   text-decoration: none;
-  color: #786746;
 }
 .detail-preview {
-  padding: 13px 17px;
-  border: 1px solid #e6d8b5;
+  margin: 16px 0;
+  padding: 10px 14px;
   border-radius: 10px;
-  background: #f6efdd;
-  font-size: 12px;
+  background: #fff6e3;
+  font-size: 11px;
   line-height: 1.8;
-  color: #8b7142;
-  margin: 24px 0 0;
+  color: #95733c;
 }
 .detail-heading {
   display: flex;
   justify-content: space-between;
-  gap: 24px;
-  align-items: center;
-  margin: 40px 0;
+  align-items: start;
+  gap: 12px;
+  margin: 20px 0 12px;
+}
+.detail-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 h1 {
-  margin: 15px 0;
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: clamp(30px, 4.6vw, 48px);
-  line-height: 1.4;
-  font-weight: 600;
+  font-size: 32px;
+  margin: 0 0 12px;
   overflow-wrap: anywhere;
+}
+.eyebrow,
+.detail-cup small {
+  display: none;
 }
 .detail-subtitle {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  color: #80735d;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 13px;
+  color: #77766f;
+  line-height: 1.8;
 }
 .price-note,
 .closed-note {
   font-size: 12px;
-  color: #79664c;
+  color: #9c762f;
   line-height: 1.8;
 }
-.closed-note {
-  color: #975543;
+.detail-location {
+  padding: 12px 14px;
+  background: #f8f9fb;
+  border: 1px solid #eceef2;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
 }
-.detail-cup {
-  display: grid;
-  justify-items: center;
-  flex: 0 0 auto;
-  gap: 10px;
-  padding: 20px;
-  border: 1px solid #ded7c7;
-  border-radius: 16px;
-}
-.detail-cup :deep(.cup-badge) {
-  flex-direction: column;
-}
-.detail-cup small {
-  color: #79674f;
-  font-size: 12px;
+.detail-location span {
+  color: #979797;
+  font-size: 11px;
 }
 .detail-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 24px;
+  margin-top: 20px;
   align-items: start;
-  gap: 26px;
+}
+.detail-main,
+.detail-aside {
+  min-width: 0;
 }
 .detail-main {
-  min-width: 0;
   display: grid;
-  gap: 22px;
+  gap: 20px;
 }
-.detail-panel {
-  padding: 28px;
-  border: 1px solid #e2d9c9;
-  border-radius: 18px;
-  background: #fffdf8;
+.detail-panel,
+.address-panel {
+  padding: 22px;
+  background: white;
+  border: 1px solid #ece9e3;
+  border-radius: 16px;
 }
 .panel-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
 }
 h2 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 18px;
 }
-.panel-heading a,
-.panel-heading > span {
+.panel-heading a {
   font-size: 12px;
-  color: #8e7e60;
-  text-decoration: none;
-  white-space: nowrap;
+  color: #9c865e;
 }
 .score-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-  padding: 24px 0;
-  margin: 16px 0 20px;
-  border-bottom: 1px solid #eee6d8;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 22px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fff8eb;
 }
 dt {
-  color: #75654d;
   font-size: 12px;
+  color: #7f7e7a;
 }
 dd {
   margin: 12px 0 0;
-  color: #686c53;
-  font-family: Georgia, serif;
-  font-size: 32px;
+  font-size: 30px;
+  font-weight: 700;
+}
+.score-summary > div:first-child dd {
+  color: #ef9205;
 }
 dd small {
   font-size: 12px;
-  font-family: sans-serif;
+  font-weight: 400;
 }
-.dimension-list {
-  display: grid;
-  gap: 16px;
-  margin: 0;
-}
-.dimension-list > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-.dimension-list dd {
-  margin: 0;
-  font-family: inherit;
-  color: #7c6d55;
+.panel-note,
+.restaurant-address,
+.distance-note,
+.map-note,
+.tag-panel p,
+.copy-feedback,
+.manual-copy {
   font-size: 12px;
+  line-height: 1.8;
+  color: #8b806b;
+  overflow-wrap: anywhere;
 }
 .panel-note {
-  margin: 24px 0 0;
-  padding-top: 20px;
-  border-top: 1px dashed #e7ddcb;
-  color: #7c694d;
-  font-size: 12px;
-  line-height: 1.8;
-}
-.review-empty {
-  padding: 42px 10px 28px;
-  text-align: center;
-}
-h3 {
-  margin: 20px 0 10px;
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 24px;
-  font-weight: 500;
-}
-.review-empty p {
-  color: #7a684e;
-  font-size: 12px;
-  line-height: 1.8;
-}
-.review-empty a {
-  display: inline-block;
-  margin-top: 14px;
-  color: #8d723f;
-  text-decoration: none;
-  font-size: 12px;
-}
-.detail-aside {
-  min-width: 0;
-}
-.address-panel {
-  padding: 24px;
-  border: 1px solid #d9dbc9;
-  border-radius: 18px;
-  background: #eaecdf;
-}
-.address-panel .eyebrow {
-  color: #7c805f;
-  font-size: 12px;
+  margin: 18px 0 0;
 }
 .address-panel h2 {
-  margin-top: 14px;
+  font-size: 16px;
 }
-.restaurant-address {
-  margin: 22px 0 14px;
-  color: #5e674d;
-  line-height: 1.9;
-  font-size: 14px;
-}
-.distance-note,
-.map-note {
-  color: #697255;
-  font-size: 12px;
-  line-height: 1.8;
-}
-.address-panel button {
-  padding: 10px 14px;
-  border: 1px solid #c1c9ad;
-  border-radius: 8px;
-  background: transparent;
-  color: #636f4b;
+.address-panel button,
+.share-button {
+  min-height: 44px;
+  border: 1px solid #dfd5c1;
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: white;
+  font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
-.map-note {
-  margin: 24px 0 0;
-  padding-top: 16px;
-  border-top: 1px solid #d2d7c1;
-}
 .tag-panel {
-  margin: 28px 0;
-}
-.tag-panel h2 {
-  font-size: 13px;
+  margin: 22px 0;
 }
 .detail-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 .detail-tags span {
-  padding: 6px 9px;
-  border: 1px solid #e1d8c6;
-  border-radius: 7px;
-  color: #8e7c5c;
+  padding: 5px 10px;
+  border-radius: 20px;
+  background: #fff5df;
   font-size: 12px;
-}
-.tag-panel p {
-  color: #7b694b;
-  font-size: 12px;
-  line-height: 1.8;
 }
 .share-button {
   width: 100%;
-  padding: 13px;
-  border: 1px solid #d9cfbb;
-  border-radius: 10px;
-  background: transparent;
-  color: #84704b;
-  font-size: 12px;
-  cursor: pointer;
-}
-.copy-feedback,
-.manual-copy {
-  color: #7c715c;
-  font-size: 12px;
-  line-height: 1.8;
-  overflow-wrap: anywhere;
 }
 .manual-copy textarea {
   width: 100%;
-  margin-top: 8px;
   padding: 10px;
-  border: 1px solid #d9cfbb;
-  border-radius: 8px;
-  background: #fffdf8;
+  border: 1px solid #dfd5c1;
+  border-radius: 10px;
   font: inherit;
 }
+.detail-actions {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid #ece9e3;
+  background: #fffffff5;
+  backdrop-filter: blur(12px);
+}
+.detail-actions > button {
+  min-height: 46px;
+  border: 1px solid #f2ad2c;
+  border-radius: 12px;
+  padding: 10px 24px;
+  background: white;
+  font: inherit;
+  color: #b58027;
+  cursor: pointer;
+}
+.detail-actions :deep(.review-open) {
+  background: #f6a00b;
+  color: white;
+  padding: 12px 52px;
+  border-radius: 12px;
+}
 .missing-restaurant {
-  width: min(650px, calc(100% - 40px));
-  margin: 80px auto;
+  width: min(650px, calc(100% - 32px));
+  margin: 70px auto;
   text-align: center;
 }
 .missing-restaurant p {
-  color: #8d7d62;
-  font-size: 14px;
   line-height: 1.8;
-  margin-bottom: 24px;
 }
 @media (max-width: 750px) {
-  .detail-layout {
-    grid-template-columns: 1fr;
+  .restaurant-detail {
+    width: calc(100% - 24px);
+    padding-top: 16px;
   }
-  .detail-heading {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .detail-cup {
-    display: flex;
-    width: 100%;
-    justify-content: space-between;
+  h1 {
+    font-size: 24px;
   }
   .detail-cup :deep(.cup-badge) {
-    flex-direction: row;
+    font-size: 11px;
+    padding: 8px;
+  }
+  .detail-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .detail-main,
+  .detail-aside {
+    width: 100%;
   }
   .detail-panel {
-    padding: 22px;
+    padding: 16px;
   }
-  .restaurant-detail {
-    width: calc(100% - 28px);
+  .detail-actions > button {
+    flex: 1;
+    padding: 10px;
+  }
+  .detail-actions :deep(.review-open) {
+    flex: 2;
+    padding: 12px 24px;
+  }
+  .score-summary {
+    padding: 14px 10px;
+  }
+  dd {
+    font-size: 26px;
+  }
+  .address-panel,
+  .tag-panel {
+    display: none;
   }
 }
 </style>

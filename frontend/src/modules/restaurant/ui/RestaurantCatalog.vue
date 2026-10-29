@@ -4,6 +4,7 @@ import { useRestaurantCatalog } from '../model/catalog.store'
 import { cupTiers } from '../model/catalog.logic'
 import CupBadge from './CupBadge.vue'
 import RestaurantCard from './RestaurantCard.vue'
+import RandomRestaurant from './RandomRestaurant.vue'
 
 const catalog = useRestaurantCatalog()
 onMounted(() => {
@@ -12,6 +13,15 @@ onMounted(() => {
 onUnmounted(catalog.cancelPending)
 // 折叠只改变展示，不清除条件；筛选与页码仍由目录状态保留。
 const filtersExpanded = ref(false)
+// 快捷分类使用真实字典编码，不将展示文案当作后端分类值。
+const quickCategories = computed(() =>
+  ['火锅', '烧烤', '面', '快餐']
+    .map((name, index) => ({
+      category: catalog.categories.find((c) => c.name.includes(name)),
+      icon: ['🍲', '🍢', '🍜', '🍱'][index],
+    }))
+    .filter((entry) => entry.category),
+)
 const advancedCount = computed(
   () =>
     Number(Boolean(catalog.filters.category)) +
@@ -33,10 +43,10 @@ async function changePage(page: number): Promise<void> {
   <section id="restaurant-directory" class="restaurant-directory" aria-labelledby="directory-title">
     <div class="directory-heading">
       <div>
-        <h2 id="directory-title">餐厅目录</h2>
+        <h2 id="directory-title">发现好味道</h2>
       </div>
       <div class="directory-links">
-        <RouterLink class="guide-link" to="/restaurants/new">＋ 新增餐厅</RouterLink>
+        <RouterLink class="guide-link" to="/restaurants/new">没找到？添加餐厅</RouterLink>
         <RouterLink class="guide-link" to="/scoring-guide">杯型评分说明 →</RouterLink>
       </div>
     </div>
@@ -60,19 +70,61 @@ async function changePage(page: number): Promise<void> {
             aria-label="搜索餐厅"
             placeholder="店名、地址、标签…"
             maxlength="100"
-          />
+          /><button type="button" class="search-submit" @click="catalog.load">搜索</button>
         </div>
-        <button
-          class="mobile-filter-toggle"
-          type="button"
-          :aria-expanded="filtersExpanded"
-          aria-controls="advanced-filters"
-          @click="filtersExpanded = !filtersExpanded"
+        <div class="quick-categories" aria-label="快捷分类">
+          <button
+            v-for="entry in quickCategories"
+            :key="entry.category!.code"
+            type="button"
+            :aria-pressed="catalog.filters.category === entry.category!.code"
+            @click="
+              catalog.filters.category =
+                catalog.filters.category === entry.category!.code ? '' : entry.category!.code
+            "
+          >
+            <span aria-hidden="true">{{ entry.icon }}</span
+            >{{ entry.category!.name }}</button
+          ><button
+            type="button"
+            :aria-expanded="filtersExpanded"
+            aria-controls="advanced-filters"
+            @click="filtersExpanded = !filtersExpanded"
+          >
+            <span aria-hidden="true">▦</span>全部分类
+          </button>
+        </div>
+        <div class="filter-controls">
+          <button type="button" disabled title="当前以清水河校区为参考，区域筛选尚未开放">
+            区域 · 待开放</button
+          ><button type="button" disabled title="等待餐厅补充正式商户类型">商户类型 · 待补充</button
+          ><button type="button" disabled title="等待餐厅补充堂食与外卖资料">
+            用餐方式 · 待补充</button
+          ><button
+            class="mobile-filter-toggle"
+            type="button"
+            :aria-expanded="filtersExpanded"
+            aria-controls="advanced-filters"
+            @click="filtersExpanded = !filtersExpanded"
+          >
+            {{ filtersExpanded ? '收起筛选' : '更多筛选'
+            }}<span v-if="advancedCount">（已选 {{ advancedCount }} 项）</span>
+          </button>
+        </div>
+        <div
+          v-if="advancedCount || catalog.filters.keyword || catalog.filters.tiers.length"
+          class="selected-filters"
         >
-          {{ filtersExpanded ? '收起筛选' : '更多筛选'
-          }}<span v-if="advancedCount">（已选 {{ advancedCount }} 项）</span>
-          <span aria-hidden="true">{{ filtersExpanded ? ' −' : ' +' }}</span>
-        </button>
+          <span v-if="catalog.filters.keyword">搜索：{{ catalog.filters.keyword }}</span
+          ><span v-if="catalog.filters.category">{{
+            catalog.categories.find((c) => c.code === catalog.filters.category)?.name
+          }}</span
+          ><span v-if="catalog.filters.view !== 'all'">{{
+            catalog.filters.view === 'recommended' ? '推荐' : '踩雷'
+          }}</span
+          ><span v-if="catalog.filters.hideClosed">隐藏标注停业</span
+          ><button type="button" @click="catalog.resetFilters">清空条件 ×</button>
+        </div>
         <div id="advanced-filters" class="advanced-filters" :class="{ expanded: filtersExpanded }">
           <fieldset class="category-filter">
             <legend>今天想吃</legend>
@@ -105,6 +157,8 @@ async function changePage(page: number): Promise<void> {
         </div>
       </aside>
       <div class="directory-content">
+        <RandomRestaurant />
+        <h2 class="nearby-title">餐厅推荐 <small>距离以清水河校区为参考</small></h2>
         <div class="tier-filters" aria-label="按杯型筛选">
           <button
             type="button"
@@ -174,10 +228,19 @@ async function changePage(page: number): Promise<void> {
             当前条件下没有已评级的餐厅。没有评价的店铺为待评级，试试“全部杯型”或其他关键词。
           </p>
           <p v-else>没有找到符合条件的餐厅，试试店名、地址或不同分类。</p>
+          <RouterLink class="add-missing" to="/restaurants/new"
+            >找不到这家店？添加餐厅 →</RouterLink
+          >
           <button type="button" class="primary-action" @click="catalog.resetFilters">
             清除筛选
           </button>
         </div>
+        <RouterLink
+          v-if="catalog.visibleRestaurants.length"
+          class="add-missing"
+          to="/restaurants/new"
+          >没找到要找的店？添加餐厅 →</RouterLink
+        >
         <nav
           v-if="!catalog.error && catalog.pages > 1"
           class="catalog-pagination"
@@ -215,235 +278,238 @@ async function changePage(page: number): Promise<void> {
 </template>
 
 <style scoped>
+/* 手机单列、桌面双列；分类在容器内滚动。 */
 .restaurant-directory {
+  min-width: 0;
   scroll-margin-top: 24px;
 }
-.directory-heading {
+.directory-heading,
+.directory-links,
+.results-toolbar,
+.sort-field {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 20px;
-  margin-bottom: 14px;
-}
-.directory-links {
-  display: flex;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 10px 18px;
+}
+.directory-heading {
+  margin: 12px 0;
+}
+h2,
+h3,
+p {
+  margin: 0;
 }
 h2 {
-  margin: 0;
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 20px;
 }
 .guide-link {
-  color: #786846;
   font-size: 12px;
   text-decoration: none;
-  white-space: nowrap;
+  color: #7b715e;
 }
 .preview-notice {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  border: 1px solid #e9dbb5;
-  border-radius: 12px;
-  background: #f7f0df;
+  margin: 8px 0 16px;
+  color: #8a7c64;
+  font-size: 11px;
+  line-height: 1.7;
 }
-.preview-label {
-  flex-shrink: 0;
-  color: #826126;
-  font-size: 12px;
-  font-weight: 800;
-}
-.preview-notice p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.8;
-  color: #7a6d51;
-}
-.directory-layout {
-  display: grid;
-  grid-template-columns: 218px minmax(0, 1fr);
-  gap: 34px;
-  align-items: start;
-}
-.directory-filters {
-  padding: 22px 20px;
-  background: #f2ece0;
-  border: 1px solid #e8dfcd;
-  border-radius: 18px;
-}
-.filter-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.filter-title h3 {
-  margin: 0;
-  font-size: 14px;
-}
-button {
-  cursor: pointer;
-  font: inherit;
-  min-height: 44px;
-}
-.mobile-filter-toggle {
+.preview-label,
+.filter-title,
+.directory-filters > .field-label {
   display: none;
 }
-.filter-title button {
-  border: 0;
-  background: none;
-  color: #867b66;
-  font-size: 12px;
-  padding: 5px 0 5px 8px;
+.directory-layout,
+.directory-content,
+.directory-filters,
+.advanced-filters {
+  min-width: 0;
 }
-.field-label {
-  display: block;
-  margin-bottom: 10px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #7f735e;
+.directory-filters {
+  display: grid;
+  gap: 16px;
+}
+button,
+select {
+  font: inherit;
+  cursor: pointer;
+  min-height: 44px;
 }
 .search-field {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 9px;
-  border: 1px solid #ded5c4;
-  border-radius: 9px;
-  background: #fffdf8;
+  gap: 10px;
+  border: 1.5px solid #f5a013;
+  border-radius: 28px;
+  padding: 3px 4px 3px 16px;
+  background: white;
 }
 .search-field > span {
-  color: #8c806a;
-  font-size: 22px;
-  line-height: 20px;
-}
-input[type='search'] {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: #2b2a26;
-  font: inherit;
-  font-size: 12px;
-  outline: none;
+  font-size: 28px;
+  color: #ef9700;
 }
 .search-field:focus-within {
-  outline: 2px solid #ad7c22;
-  outline-offset: 2px;
+  outline: 2px solid #edb044;
+  outline-offset: 3px;
 }
-fieldset {
-  padding: 0;
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
   border: 0;
-  margin: 26px 0;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+}
+.search-submit {
+  border: 0;
+  border-radius: 24px;
+  padding: 8px 24px;
+  background: #f59b08;
+  color: white;
+}
+.quick-categories {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+}
+.quick-categories button {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+  background: none;
+  border: 0;
+  border-radius: 14px;
+  padding: 10px;
+  font-size: 14px;
+}
+.quick-categories button span {
+  font-size: 36px;
+  line-height: 42px;
+}
+.quick-categories button[aria-pressed='true'] {
+  background: #fff3d6;
+  color: #b66a00;
+}
+.filter-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.filter-controls button {
+  flex: 1;
+  white-space: nowrap;
+  border: 1px solid #e7e9ed;
+  border-radius: 24px;
+  padding: 8px 12px;
+  background: white;
+  font-size: 12px;
+}
+.filter-controls button:disabled {
+  color: #8a8e97;
+}
+.advanced-filters {
+  display: none;
+  padding: 16px;
+  background: #fffaf0;
+  border-radius: 16px;
+}
+.advanced-filters.expanded {
+  display: block;
+}
+.category-filter {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
 }
-legend {
-  margin-bottom: 12px;
+.category-filter legend {
   font-size: 12px;
-  font-weight: 700;
-  color: #7f735e;
+  margin-bottom: 10px;
 }
-.category-filter button {
-  padding: 7px 10px;
-  border: 1px solid #e0d5bf;
-  border-radius: 7px;
-  background: transparent;
-  color: #7a705e;
+.category-filter button,
+.tier-filters button {
+  padding: 6px 12px;
+  border: 1px solid #e8e1d4;
+  border-radius: 20px;
+  background: white;
   font-size: 12px;
 }
-.category-filter button[aria-pressed='true'] {
-  color: #fffdf8;
-  border-color: #33372e;
-  background: #33372e;
+.category-filter button[aria-pressed='true'],
+.tier-filters button[aria-pressed='true'] {
+  border-color: #f0b84a;
+  background: #fff3d6;
+}
+.field-label {
+  display: block;
+  font-size: 12px;
+  margin: 10px 0;
 }
 select {
-  width: 100%;
-  min-height: 44px;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid #ddd3bf;
-  border-radius: 9px;
-  background: #fffdf8;
-  font: inherit;
+  max-width: 100%;
+  border: 1px solid #e7e9ed;
+  border-radius: 10px;
+  padding: 8px;
+  background: white;
   font-size: 12px;
-  color: #625841;
 }
 .closed-filter {
   display: flex;
   align-items: center;
+  gap: 8px;
   min-height: 44px;
-  gap: 6px;
-  margin-top: 18px;
   font-size: 12px;
-  line-height: 1.7;
-  color: #796e5a;
 }
-.closed-filter input {
-  margin: 2px 0 0;
-  accent-color: #676b49;
+.selected-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
 }
-.directory-content {
-  min-width: 0;
+.selected-filters span {
+  padding: 7px 12px;
+  border-radius: 20px;
+  background: #fff4df;
+  overflow-wrap: anywhere;
+}
+.selected-filters button {
+  border: 0;
+  background: none;
+  color: #a67420;
+  font-size: 12px;
+}
+.nearby-title {
+  margin: 22px 0 14px;
+}
+.nearby-title small {
+  margin-left: 12px;
+  font-size: 11px;
+  color: #8a8e97;
+  font-weight: 400;
 }
 .tier-filters {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  gap: 8px;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 4px 2px;
 }
 .tier-filters button {
-  padding: 5px;
-  border: 1px solid #e3dbcc;
-  border-radius: 999px;
-  background: transparent;
-  font-size: 12px;
-  color: #7b705b;
-}
-.tier-filters button[aria-pressed='true'] {
-  outline: 2px solid #8a6c26;
-  outline-offset: 1px;
-  border-color: #c9b47d;
-  background: #ede3c9;
-  color: #6c541b;
+  flex-shrink: 0;
 }
 .results-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin: 16px 0;
-  scroll-margin-top: 16px;
+  margin: 10px 0 16px;
 }
-.results-toolbar p {
-  margin: 0;
-  font-size: 12px;
-  color: #796a51;
-}
-.results-toolbar strong {
-  color: #413a2d;
-  font-size: 14px;
-}
+.results-toolbar p,
 .sort-field {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.sort-field label {
-  white-space: nowrap;
   font-size: 12px;
-  color: #796a51;
-}
-.sort-field select {
-  width: 130px;
-  padding: 7px 9px;
-  background: transparent;
+  color: #7d7d82;
 }
 .restaurant-grid {
   display: grid;
@@ -453,129 +519,65 @@ select {
 .directory-empty {
   display: grid;
   justify-items: center;
-  padding: 64px 24px;
-  border: 1px dashed #d9ceba;
-  border-radius: 20px;
+  gap: 18px;
   text-align: center;
-}
-.directory-empty h3 {
-  margin: 22px 0 0;
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 25px;
+  padding: 48px 20px;
+  border: 1px dashed #e3d8c6;
+  border-radius: 18px;
 }
 .directory-empty p {
   max-width: 440px;
-  margin: 14px 0 24px;
-  color: #81745c;
   font-size: 13px;
   line-height: 1.8;
+  color: #827459;
 }
 .catalog-pagination {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 32px;
+  margin: 24px 0;
 }
 .catalog-pagination button {
-  display: block;
-  padding: 8px 11px;
-  border: 1px solid #ded4c1;
-  border-radius: 8px;
-  background: transparent;
+  padding: 8px 12px;
+  border: 1px solid #e6dfd1;
+  border-radius: 10px;
+  background: white;
   font-size: 12px;
-  color: #7c6f57;
 }
 .catalog-pagination button[aria-current='page'] {
-  background: #33372e;
-  border-color: #33372e;
-  color: white;
+  background: #f0b53b;
 }
-@media (max-width: 1000px) {
-  .directory-layout {
-    grid-template-columns: 190px minmax(0, 1fr);
-    gap: 22px;
-  }
+@media (max-width: 760px) {
   .restaurant-grid {
     grid-template-columns: 1fr;
   }
-}
-@media (max-width: 700px) {
-  .directory-layout {
-    grid-template-columns: 1fr;
+  .directory-heading h2 {
+    font-size: 16px;
   }
-  .directory-filters {
-    padding: 10px 12px;
-  }
-  .filter-title {
-    margin-bottom: 0;
-  }
-  .filter-title h3,
-  .directory-filters > .field-label {
+  .directory-links .guide-link:last-child {
     display: none;
   }
-  .directory-filters {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
-    gap: 0 10px;
-  }
-  .filter-title {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .search-field {
-    grid-column: 1;
-    grid-row: 1;
-    min-height: 44px;
-  }
-  .mobile-filter-toggle,
-  .advanced-filters {
-    grid-column: 1 / -1;
-  }
-  .mobile-filter-toggle {
-    display: block;
-    padding: 6px 0;
-    border: 0;
-    background: none;
+  .quick-categories button {
     font-size: 12px;
-    color: #625841;
+    padding: 6px 3px;
   }
-  .advanced-filters {
-    display: none;
+  .quick-categories button span {
+    font-size: 30px;
   }
-  .advanced-filters.expanded {
+  .filter-controls {
+    gap: 5px;
+  }
+  .filter-controls button {
+    font-size: 10px;
+    padding: 8px 6px;
+  }
+  .nearby-title small {
     display: block;
+    margin: 6px 0 0;
   }
-  fieldset {
-    margin: 20px 0;
-  }
-  .directory-heading {
-    align-items: center;
-    gap: 12px;
-  }
-  .preview-notice {
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .results-toolbar {
-    align-items: flex-start;
-  }
-  .guide-link {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-  }
-  .tier-filters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding: 3px;
-    margin: -3px;
-  }
-  .tier-filters button {
-    flex: 0 0 auto;
-  }
-  .directory-layout {
-    gap: 14px;
+  .search-submit {
+    padding: 8px 20px;
   }
 }
 </style>

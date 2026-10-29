@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia'
 import { AxiosError, AxiosHeaders } from 'axios'
 import { createApp, h, nextTick, ref } from 'vue'
 import type { App } from 'vue'
@@ -36,7 +37,9 @@ describe('restaurant detail API integration', () => {
     vi.restoreAllMocks()
   })
   async function mount() {
-    app = createApp({ render: () => h(RestaurantDetail, { id: currentId.value }) }).use(router)
+    app = createApp({ render: () => h(RestaurantDetail, { id: currentId.value }) })
+      .use(router)
+      .use(createPinia())
     app.mount(host)
     await settle()
   }
@@ -82,7 +85,7 @@ describe('restaurant detail API integration', () => {
     host.querySelector<HTMLButtonElement>('.share-button')!.click()
     await settle()
     expect(host.querySelector('.copy-feedback')?.textContent).toContain('手动复制')
-    const text = host.querySelector<HTMLTextAreaElement>('textarea')?.value
+    const text = host.querySelector<HTMLTextAreaElement>('.manual-copy textarea')?.value
     expect(text).toContain(`/restaurants/${restaurantFixture.id}`)
     expect(text).toContain('联调模拟数据')
   })
