@@ -30,7 +30,7 @@ const advancedCount = computed(
 )
 const resultsHeading = useTemplateRef('resultsHeading')
 
-/** 翻页后返回结果栏，键盘和手机用户无需手动滚回列表顶部。 */
+/** 翻页后聚焦结果栏，让键盘与手机用户回到当前页内容。 */
 async function changePage(page: number): Promise<void> {
   catalog.goToPage(page)
   await nextTick()
@@ -49,10 +49,6 @@ async function changePage(page: number): Promise<void> {
         <RouterLink class="guide-link" to="/restaurants/new">没找到？添加餐厅</RouterLink>
         <RouterLink class="guide-link" to="/scoring-guide">杯型评分说明 →</RouterLink>
       </div>
-    </div>
-    <div class="preview-notice" role="note">
-      <span class="preview-label">餐厅目录</span>
-      <p>营业、地址及消费请出发前核实。带“联调模拟”标签的店铺仅供测试，不代表真实经营情况。</p>
     </div>
     <div class="directory-layout">
       <aside class="directory-filters" aria-label="餐厅筛选">
@@ -95,12 +91,7 @@ async function changePage(page: number): Promise<void> {
           </button>
         </div>
         <div class="filter-controls">
-          <button type="button" disabled title="当前以清水河校区为参考，区域筛选尚未开放">
-            区域 · 待开放</button
-          ><button type="button" disabled title="等待餐厅补充正式商户类型">商户类型 · 待补充</button
-          ><button type="button" disabled title="等待餐厅补充堂食与外卖资料">
-            用餐方式 · 待补充</button
-          ><button
+          <button
             class="mobile-filter-toggle"
             type="button"
             :aria-expanded="filtersExpanded"
@@ -159,44 +150,46 @@ async function changePage(page: number): Promise<void> {
       <div class="directory-content">
         <RandomRestaurant />
         <h2 class="nearby-title">餐厅推荐 <small>距离以清水河校区为参考</small></h2>
-        <div class="tier-filters" aria-label="按杯型筛选">
-          <button
-            type="button"
-            :aria-pressed="catalog.filters.tiers.length === 0"
-            @click="catalog.filters.tiers = []"
-          >
-            全部杯型
-          </button>
-          <button
-            v-for="tier in cupTiers"
-            :key="tier.key"
-            type="button"
-            :aria-pressed="catalog.filters.tiers.includes(tier.key)"
-            :title="tier.description"
-            @click="catalog.toggleTier(tier.key)"
-          >
-            <CupBadge :tier="tier.key" compact />
-          </button>
-        </div>
-        <div ref="resultsHeading" class="results-toolbar" tabindex="-1" aria-label="餐厅筛选结果">
-          <p role="status" aria-live="polite">
-            {{ catalog.loading ? '正在加载 · ' : '' }}找到
-            <strong>{{ catalog.total }}</strong> 家餐厅<span v-if="catalog.total">
-              · 第 {{ catalog.page }} / {{ catalog.pages }} 页</span
+        <div class="results-controls">
+          <div class="tier-filters" aria-label="按杯型筛选">
+            <button
+              type="button"
+              :aria-pressed="catalog.filters.tiers.length === 0"
+              @click="catalog.filters.tiers = []"
             >
-          </p>
-          <div class="sort-field">
-            <label for="restaurant-sort">排序</label
-            ><select id="restaurant-sort" v-model="catalog.filters.sort">
-              <option value="score">综合评分</option>
-              <option value="taste">味道</option>
-              <option value="value">性价比</option>
-              <option value="service">服务</option>
-              <option value="ambience">环境</option>
-              <option value="reviews">评价数量</option>
-              <option value="price">人均从低到高</option>
-              <option value="distance">离校区最近</option>
-            </select>
+              全部杯型
+            </button>
+            <button
+              v-for="tier in cupTiers"
+              :key="tier.key"
+              type="button"
+              :aria-pressed="catalog.filters.tiers.includes(tier.key)"
+              :title="tier.description"
+              @click="catalog.toggleTier(tier.key)"
+            >
+              <CupBadge :tier="tier.key" compact />
+            </button>
+          </div>
+          <div ref="resultsHeading" class="results-toolbar" tabindex="-1" aria-label="餐厅筛选结果">
+            <p role="status" aria-live="polite">
+              {{ catalog.loading ? '正在加载 · ' : '' }}找到
+              <strong>{{ catalog.total }}</strong> 家餐厅<span v-if="catalog.total">
+                · 第 {{ catalog.page }} / {{ catalog.pages }} 页</span
+              >
+            </p>
+            <div class="sort-field">
+              <label for="restaurant-sort">排序</label
+              ><select id="restaurant-sort" v-model="catalog.filters.sort">
+                <option value="score">综合评分</option>
+                <option value="taste">味道</option>
+                <option value="value">性价比</option>
+                <option value="service">服务</option>
+                <option value="ambience">环境</option>
+                <option value="reviews">评价数量</option>
+                <option value="price">人均从低到高</option>
+                <option value="distance">离校区最近</option>
+              </select>
+            </div>
           </div>
         </div>
         <div v-if="catalog.error" class="directory-empty" role="alert">
@@ -234,6 +227,10 @@ async function changePage(page: number): Promise<void> {
           <button type="button" class="primary-action" @click="catalog.resetFilters">
             清除筛选
           </button>
+        </div>
+        <div class="preview-notice" role="note">
+          <span class="preview-label">餐厅目录</span>
+          <p>营业、地址及消费请出发前核实。带“联调模拟”标签的店铺仅供测试，不代表真实经营情况。</p>
         </div>
         <RouterLink
           v-if="catalog.visibleRestaurants.length"
@@ -278,10 +275,18 @@ async function changePage(page: number): Promise<void> {
 </template>
 
 <style scoped>
-/* 手机单列、桌面双列；分类在容器内滚动。 */
+/* 首页展示样式统一使用暖色、轻边框及紧凑间距。 */
 .restaurant-directory {
   min-width: 0;
   scroll-margin-top: 24px;
+}
+h2,
+h3,
+p {
+  margin: 0;
+}
+h2 {
+  font-size: 20px;
 }
 .directory-heading,
 .directory-links,
@@ -294,26 +299,21 @@ async function changePage(page: number): Promise<void> {
   flex-wrap: wrap;
 }
 .directory-heading {
-  margin: 12px 0;
-}
-h2,
-h3,
-p {
-  margin: 0;
-}
-h2 {
-  font-size: 20px;
+  margin: 12px 0 16px;
 }
 .guide-link {
+  color: #858585;
   font-size: 12px;
   text-decoration: none;
-  color: #7b715e;
+}
+.guide-link:hover {
+  color: #a86506;
 }
 .preview-notice {
-  margin: 8px 0 16px;
-  color: #8a7c64;
+  color: #958977;
   font-size: 11px;
   line-height: 1.7;
+  margin-top: 16px;
 }
 .preview-label,
 .filter-title,
@@ -328,94 +328,103 @@ h2 {
 }
 .directory-filters {
   display: grid;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
 }
 button,
 select {
   font: inherit;
   cursor: pointer;
-  min-height: 44px;
+  min-height: 40px;
+}
+button:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 3px;
 }
 .search-field {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  border: 1.5px solid #f5a013;
-  border-radius: 28px;
-  padding: 3px 4px 3px 16px;
+  gap: 12px;
+  padding: 4px 4px 4px 16px;
+  border: 1px solid #edc27c;
+  border-radius: 12px;
   background: white;
 }
 .search-field > span {
-  font-size: 28px;
-  color: #ef9700;
+  color: #d28a20;
+  font-size: 24px;
 }
 .search-field:focus-within {
-  outline: 2px solid #edb044;
-  outline-offset: 3px;
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
 }
 .search-field input {
   flex: 1;
-  min-width: 0;
   width: 100%;
+  min-width: 0;
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
   outline: none;
 }
 .search-submit {
-  border: 0;
-  border-radius: 24px;
   padding: 8px 24px;
-  background: #f59b08;
-  color: white;
+  border: 0;
+  border-radius: 9px;
+  background: #f59e0b;
+  color: #fff;
+  font-weight: 700;
 }
 .quick-categories {
   display: flex;
-  justify-content: space-around;
-  gap: 8px;
-}
-.quick-categories button {
-  display: grid;
-  justify-items: center;
   gap: 8px;
   min-width: 0;
-  background: none;
-  border: 0;
-  border-radius: 14px;
-  padding: 10px;
-  font-size: 14px;
+  overflow-x: auto;
+}
+.quick-categories button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  color: #746a5e;
 }
 .quick-categories button span {
-  font-size: 36px;
-  line-height: 42px;
+  font-size: 21px;
+}
+.quick-categories button:hover {
+  background: #fff4df;
 }
 .quick-categories button[aria-pressed='true'] {
-  background: #fff3d6;
-  color: #b66a00;
-}
-.filter-controls {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  background: #fff1d8;
+  color: #a5680f;
+  border-color: #f1d8ac;
 }
 .filter-controls button {
-  flex: 1;
-  white-space: nowrap;
-  border: 1px solid #e7e9ed;
-  border-radius: 24px;
-  padding: 8px 12px;
   background: white;
+  border: 1px solid #f0e9df;
+  border-radius: 9px;
+  padding: 8px 12px;
   font-size: 12px;
-}
-.filter-controls button:disabled {
-  color: #8a8e97;
+  color: #746a5e;
 }
 .advanced-filters {
   display: none;
+  grid-column: 1 / -1;
   padding: 16px;
-  background: #fffaf0;
-  border-radius: 16px;
+  border: 1px solid #f0e9df;
+  background: white;
+  border-radius: 12px;
 }
 .advanced-filters.expanded {
   display: block;
@@ -424,73 +433,76 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 16px;
-  padding: 0;
+  margin: 0 0 12px;
   border: 0;
+  padding: 0;
 }
 .category-filter legend {
+  margin-bottom: 8px;
   font-size: 12px;
-  margin-bottom: 10px;
+  color: #858585;
 }
 .category-filter button,
 .tier-filters button {
-  padding: 6px 12px;
-  border: 1px solid #e8e1d4;
-  border-radius: 20px;
+  padding: 4px 12px;
+  border: 1px solid #f0e9df;
+  border-radius: 9px;
   background: white;
   font-size: 12px;
 }
 .category-filter button[aria-pressed='true'],
 .tier-filters button[aria-pressed='true'] {
-  border-color: #f0b84a;
-  background: #fff3d6;
+  background: #fff2dc;
+  border-color: #eecb91;
 }
 .field-label {
   display: block;
   font-size: 12px;
-  margin: 10px 0;
+  margin: 8px 0;
 }
 select {
   min-width: 0;
   max-width: 100%;
-  border: 1px solid #e7e9ed;
-  border-radius: 10px;
   padding: 8px;
+  border: 1px solid #f0e9df;
+  border-radius: 9px;
   background: white;
   font-size: 12px;
+  color: #746a5e;
 }
 .closed-filter {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-height: 44px;
+  gap: 8px;
   font-size: 12px;
 }
 .selected-filters {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
 }
 .selected-filters span {
-  padding: 7px 12px;
-  border-radius: 20px;
-  background: #fff4df;
+  background: #fff2dc;
+  padding: 8px 12px;
+  border-radius: 8px;
   overflow-wrap: anywhere;
 }
 .selected-filters button {
   border: 0;
-  background: none;
-  color: #a67420;
+  background: transparent;
+  color: #a5680f;
   font-size: 12px;
 }
 .nearby-title {
-  margin: 22px 0 14px;
+  margin: 20px 0 12px;
 }
 .nearby-title small {
   margin-left: 12px;
   font-size: 11px;
-  color: #8a8e97;
+  color: #858585;
   font-weight: 400;
 }
 .tier-filters {
@@ -504,32 +516,49 @@ select {
   flex-shrink: 0;
 }
 .results-toolbar {
-  margin: 10px 0 16px;
+  margin: 8px 0 12px;
+  scroll-margin-top: 16px;
 }
 .results-toolbar p,
 .sort-field {
   font-size: 12px;
-  color: #7d7d82;
+  color: #858585;
+}
+/* 桌面把杯型、数量与排序合为一行，手机按容器宽度自然换行。 */
+.results-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.results-controls .results-toolbar {
+  margin: 0;
+  flex-shrink: 0;
+}
+.results-controls .tier-filters {
+  min-width: 0;
 }
 .restaurant-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
 }
 .directory-empty {
   display: grid;
   justify-items: center;
-  gap: 18px;
+  gap: 16px;
   text-align: center;
   padding: 48px 20px;
-  border: 1px dashed #e3d8c6;
-  border-radius: 18px;
+  border: 1px dashed #e4d9c8;
+  border-radius: 16px;
+  background: white;
 }
 .directory-empty p {
   max-width: 440px;
   font-size: 13px;
   line-height: 1.8;
-  color: #827459;
+  color: #858585;
 }
 .catalog-pagination {
   display: flex;
@@ -540,44 +569,88 @@ select {
 }
 .catalog-pagination button {
   padding: 8px 12px;
-  border: 1px solid #e6dfd1;
-  border-radius: 10px;
+  border: 1px solid #f0e9df;
+  border-radius: 9px;
   background: white;
   font-size: 12px;
 }
 .catalog-pagination button[aria-current='page'] {
-  background: #f0b53b;
+  background: #fff1d8;
+  border-color: #edc27c;
+  color: #a5680f;
 }
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
+  .results-controls {
+    flex-wrap: wrap;
+  }
+  .results-controls .results-toolbar {
+    width: 100%;
+  }
   .restaurant-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+@media (max-width: 600px) {
+  .directory-heading {
+    margin: 8px 0 12px;
   }
   .directory-heading h2 {
-    font-size: 16px;
+    font-size: 18px;
   }
   .directory-links .guide-link:last-child {
     display: none;
   }
+  .directory-filters {
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .quick-categories {
+    gap: 4px;
+  }
   .quick-categories button {
-    font-size: 12px;
-    padding: 6px 3px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 4px 6px;
+    gap: 4px;
+    font-size: 11px;
+    min-height: 44px;
   }
   .quick-categories button span {
-    font-size: 30px;
+    font-size: 18px;
   }
   .filter-controls {
-    gap: 5px;
+    justify-self: end;
   }
   .filter-controls button {
-    font-size: 10px;
-    padding: 8px 6px;
-  }
-  .nearby-title small {
-    display: block;
-    margin: 6px 0 0;
+    min-height: 44px;
   }
   .search-submit {
-    padding: 8px 20px;
+    padding: 8px 16px;
+  }
+  .restaurant-grid {
+    grid-template-columns: 1fr;
+  }
+  .nearby-title {
+    margin: 16px 0 8px;
+    font-size: 18px;
+  }
+  .nearby-title small {
+    margin-left: 8px;
+    font-size: 10px;
+  }
+  .tier-filters button,
+  select {
+    min-height: 44px;
+  }
+  .results-toolbar {
+    gap: 8px;
+  }
+  .results-toolbar p {
+    font-size: 11px;
+  }
+  .sort-field {
+    gap: 4px;
   }
 }
 </style>

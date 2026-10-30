@@ -1,424 +1,217 @@
-# Development Log
-
-本文档按时间记录项目的重要开发变更、验证结果和后续工作。内容过长时，后续日志依次写入 `development2.md`、`development3.md`。
-
-后续开发记录见 [development2.md](development2.md)，包含服务器主动拉取产物的自动发布改造及验收记录。
-
-## 2026-10-27：建立 V2 模块化单体重构基线
-
-### 开发分支
-
-- 当前分支：`refactor`
-- 基线分支：`develop`
-- 上游仓库：`https://github.com/ssjsjjjss/ginkgo-food-map.git`
-
-### 变更目的
-
-将原有 Node.js 与静态前端混合项目重构为职责清晰的前后端分离项目。在服务器资源有限的前提下，后端先采用模块化单体，并通过明确的模块边界为以后拆分微服务做准备。
-
-### 当前技术架构
-
-- 后端：Java 21、Spring Boot 4、Spring Security、Spring Data JPA、Flyway。
-- 数据存储：MySQL 8.4、Redis。
-- 前端：Vue 3、TypeScript、Vite、Vue Router、Pinia、Axios。
-- 部署：Nginx 托管前端静态资源并反向代理后端接口。
-
-### 目录与职责调整
-
-- 新建 `backend`，按 `user`、`restaurant`、`review`、`admin`、`file`、`security`、`system` 和 `common` 划分模块。
-- 新建 `frontend`，按 `app`、`pages`、`modules` 和 `shared` 划分职责。
-- 新增 Flyway 数据库迁移基础配置。
-- 新增 MySQL、Redis 和前端的容器编排配置。
-- 移除原项目中混合存放的构建产物、旧静态资源、旧 Node.js 服务及旧测试脚本。
-- 补充模块化单体、前端架构和旧版本迁移说明。
-
-### 架构约束
-
-- 每个业务模块只访问自己拥有的数据和 Repository。
-- 跨模块协作通过公开服务接口或领域事件完成。
-- `common` 只存放通用技术能力，不承载业务逻辑。
-- 数据库结构只通过 Flyway 迁移脚本修改。
-- 权限判断必须由服务端完成。
-
-### 已完成验证
-
-- 后端执行 `mvn test` 成功。
-- 测试结果：2 个测试通过，0 个失败，0 个错误。
-- 前端此前执行 `npm run check` 成功，包含 ESLint、Vitest、类型检查和生产构建。
-- Docker Compose 配置解析通过；尚未执行完整容器启动验证。
-
-### 当前环境状态
-
-- MySQL 地址：`localhost:3306`，本地开发账户通过环境变量提供。
-- Redis 使用数据库 `4`，无密码；检查时 Redis 服务尚未启动。
-- SMTP、JWT RSA 密钥和验证码 HMAC 密钥尚未配置。
-- 敏感凭据不得写入 Git 仓库。
-
-### 后续工作
-
-1. 审核并提交当前 V2 重构基线。
-2. 将 `refactor` 推送到远程并通过 Pull Request 合并到 `develop`。
-3. 从更新后的 `develop` 创建 `feature/user-auth`。
-4. 分阶段实现用户注册、登录、JWT、Redis 会话、退出登录和密码重置。
-
-## 2026-10-27：移除 Docker MySQL 硬编码凭据
-
-### 变更内容
-
-- `compose.yaml` 不再保存固定的 MySQL 数据库名、用户和密码。
-- Docker MySQL 配置统一从 `MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD` 和 `MYSQL_ROOT_PASSWORD` 环境变量读取。
-- `.env.example` 增加对应的非敏感示例配置，真实密码继续由未纳入版本控制的本地 `.env` 提供。
-
-### 验证结果
-
-- 执行 `docker compose --env-file .env.example config --quiet` 成功。
-
-## 2026-10-27：重构分支提交前清理
-
-### 变更内容
-
-- 清理 `.gitignore` 和根目录 `README.md` 的多余文件尾空行。
-- 对 V2 重构内容执行提交前完整检查，检查通过后提交并推送至 `refactor` 分支。
-
-### 验证结果
-
-- 后端执行 `mvn verify` 成功：2 个测试通过，0 个失败，0 个错误。
-- 前端执行 `npm run check` 成功：ESLint、Vitest、类型检查和生产构建全部通过。
-- 执行 `docker compose --env-file .env.example config --quiet` 成功。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立用户认证依赖基线
-
-### 开发分支
-
-- `feature/user-auth`
-
-### 变更内容
-
-- 引入 Spring Boot Mail，为后续使用 `JavaMailSender` 发送邮箱验证码提供支持。
-- 引入 Spring Security OAuth2 Resource Server，使用成熟组件完成 JWT 解码和验证。
-- 引入 Spring Boot Testcontainers、Testcontainers JUnit 5 与 MySQL 模块，为真实数据库和 Redis 原子性集成测试提供基础。
-- 依赖版本继续由 Spring Boot 统一管理，不在项目中单独硬编码版本。
-
-### 验证结果
-
-- 执行 `mvn verify` 成功。
-- 2 个现有测试全部通过，0 个失败，0 个错误。
-
-## 2026-10-27：建立认证配置结构
-
-### 变更内容
-
-- 启用 Spring Boot 类型安全配置扫描。
-- 在 `user` 模块增加注册策略配置，包含允许的校园邮箱域名、用户名长度和密码长度限制。
-- 在 `security` 模块增加验证码、JWT 和登录失败防护配置。
-- 验证码默认有效期为 5 分钟、发送冷却为 60 秒、最多尝试 5 次，并配置单邮箱小时及每日限额。
-- JWT 默认固定有效期为 7 天，配置签发者、接收方和 RSA 密钥文件位置。
-- Redis 默认切换到数据库 `4`。
-- 增加 SMTP 连接、读取和写入超时配置。
-- `.env.example` 只提供环境变量名称与非敏感占位值，不保存真实 SMTP 凭据、HMAC 密钥或 RSA 私钥。
-
-### 配置边界
-
-- 用户注册规则由 `user` 模块拥有。
-- JWT、验证码和登录防护规则由 `security` 模块拥有。
-- 测试环境使用独立的非敏感 HMAC 测试值。
-
-### 验证结果
-
-- 执行 `mvn verify` 成功。
-- 2 个现有测试全部通过，0 个失败，0 个错误。
-
-## 2026-10-27：完善代码注释与文件变更说明规则
-
-### 规则调整
-
-- `AGENTS.md` 新增注释规范：修改代码时必须说明职责、设计原因、安全边界和非显然逻辑。
-- 禁止使用逐行翻译代码的无效注释。
-- 开发日志保持简洁，只记录阶段性变更、关键设计和验证结果。
-- 修改文件及用途改为每次完成修改后在交付说明中直接提供。
-
-### 验证结果
-
-- 执行 `mvn verify` 成功。
-- 2 个现有测试全部通过，0 个失败，0 个错误。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立用户认证数据库结构
-
-### 变更内容
-
-- 新增用户、角色、用户角色关系和安全审计表。
-- 用户名与邮箱使用数据库唯一约束，作为并发注册的最终一致性保证。
-- 用户表增加凭证版本和乐观锁版本，为密码重置后撤销旧会话及并发更新提供基础。
-- 安全审计只保存非敏感事件信息和不可逆摘要，不保存密码、验证码或完整 Token。
-- 初始化普通用户和管理员角色定义，不创建默认管理员账号或初始密码。
-
-### 验证结果
-
-- V1、V2 迁移已在 MySQL 8.0.34 临时数据库中完整执行成功。
-- 唯一约束、检查约束和外键均已通过数据库元数据核对。
-- 中文角色名称在 `utf8mb4` 客户端编码下写入正确。
-- 临时验证数据库已删除，正式业务数据库未被修改。
-- 执行 `mvn verify` 成功，2 个测试全部通过。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立 MyBatis-Plus 用户持久化模型
-
-### 变更内容
-
-- 持久化技术由 Spring Data JPA 调整为 MyBatis-Plus Spring Boot 4 Starter。
-- 增加用户、角色和显式用户角色关联 Entity，并与 V2 数据库迁移保持一致。
-- 持久化对象统一使用 `Entity` 后缀，与所在目录和团队常用命名保持一致。
-- 用户 Entity 只接收密码哈希，负责维护账号状态、凭证版本和乐观锁版本。
-- 密码哈希变更时同步递增凭证版本，为旧 JWT 失效提供持久化依据。
-- 增加用户、角色和用户角色 Mapper，并保持为 user 模块内部能力。
-- 复合主键关系表使用显式 SQL，不强行使用 MyBatis-Plus 单主键通用方法。
-- 增加 Mapper 测试，覆盖规范化查询、用户名和邮箱唯一约束、凭证版本、乐观锁版本及角色分配。
-- MyBatis 一级缓存范围调整为语句级，避免同一 SqlSession 的重复查询共享可变 Entity。
-
-### 验证结果
-
-- 执行 `mvn clean verify` 成功，共 7 个测试通过，0 个失败，0 个错误。
-- 源码和 Maven 依赖树均未发现 JPA 或 Hibernate 残留。
-- MyBatis-Plus 乐观锁已验证能够拒绝陈旧版本更新。
-- 执行 `git diff --check` 未发现空白错误。
-- Docker 服务未启动，因此 Testcontainers MySQL/Redis 集成测试仍待后续执行；本阶段没有以 H2 测试替代该结论。
-
-## 2026-10-27：建立统一异常响应
-
-### 变更内容
-
-- 成功与失败响应统一提供 `success`、`code`、`message`、`data` 和 `timestamp` 字段。
-- 增加可由业务模块扩展的错误码协议、业务异常和全局异常处理器。
-- 参数校验错误返回字段级详情；数据库约束和未知异常不向客户端泄露内部信息。
-- 明确 Spring Security 过滤器的 401/403 将由后续专用安全处理器接入同一响应格式。
-
-### 验证结果
-
-- 增加业务异常、参数校验、非法 JSON 和未知异常的 MVC 测试。
-- 执行 `mvn clean verify` 成功，共 11 个测试通过，0 个失败，0 个错误。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立 Redis 邮箱验证码核心
-
-### 变更内容
-
-- 使用 `SecureRandom` 生成数字验证码，Redis 仅保存服务端密钥计算的 HMAC，不保存明文验证码、邮箱或 IP。
-- 注册与密码重置验证码通过用途键和 HMAC 原文双重隔离。
-- 使用 Lua 原子完成发送冷却、单邮箱小时/24 小时限额、失败次数及一次性消费。
-- 验证码先预留为 pending，邮件成功后激活；邮件失败可按预留 ID 安全取消，发送配额不回退。
-- Redis 异常统一失败关闭，不允许验证码校验绕过。
-- 用户模块统一采用 `controller`、`service`、`mapper` 经典分层，并按职责补充 `entity`、`dto`、`config` 和 `exception`。
-- 验证码服务使用 `@Service`，依赖注入构造器和日志字段由 Lombok 生成；Entity、DTO 和配置对象使用 `@Data`，敏感字段排除在 `toString()` 外。
-
-### 验证结果
-
-- 验证码生成与 Redis 故障失败关闭测试通过。
-- 在本机 Redis 4 号库执行 5 个原子性集成测试全部通过；测试使用随机前缀并精确清理自己的键。
-- 执行 `mvn clean verify` 成功：13 个常规测试通过，5 个需显式启用的 Redis 集成测试按设计跳过。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立验证码邮件投递闭环
-
-### 变更内容
-
-- 使用 `JavaMailSender` 发送注册和密码重置验证码邮件，发件地址及主题前缀支持配置。
-- 邮件发送前预留 pending 验证码，发送成功后激活；发送失败按预留 ID 取消验证码和冷却状态。
-- 邮件失败不回退小时及24小时频率计数，防止利用 SMTP 故障绕过限流。
-- 邮件与异常日志均不记录邮箱、验证码、SMTP 凭据或其他敏感内容。
-
-### 验证结果
-
-- 邮件成功激活及 SMTP 失败取消 pending 状态测试通过，全程使用 Mock 邮件发送器，未发送真实邮件。
-- 本机 Redis 4号库的5个原子性集成测试全部通过。
-- 执行 `mvn clean verify` 成功：15个常规测试通过，5个需显式启用的 Redis 集成测试按设计跳过。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：开放邮箱验证码接口
-
-### 变更内容
-
-- 增加注册和密码重置验证码 Controller，Controller 只处理 DTO 校验和统一响应。
-- 增加邮箱验证码业务 Service，精确校验配置允许的校园邮箱域名，并通过 UserMapper 查询账号状态。
-- 注册验证码拒绝已注册邮箱；密码重置对未注册邮箱静默返回成功，避免响应直接泄露账号存在性。
-- Spring Security 只公开两个明确的 POST 路径，不放开整个 `/auth` 路径。
-- 当前阶段不接收或记录客户端 IP，只保留单邮箱冷却及频率限制；来源级限流后续按实际流量在 Nginx 或网关增加。
-
-### 验证结果
-
-- Controller 与业务 Service 新增8个测试全部通过。
-- 安全边界测试确认匿名 POST 可访问，未公开的同路径 GET 仍返回401。
-- 执行 `mvn clean verify` 成功：25个常规测试通过，5个需显式启用的 Redis 集成测试按设计跳过。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：简化验证码限流策略
-
-### 变更内容
-
-- 根据当前阶段目标移除客户端 IP 采集、IP 限流配置和对应 Redis 键。
-- 验证码安全边界保留校园邮箱精确域名校验、单邮箱60秒冷却、小时/24小时限额和一次性消费。
-- 来源级防刷能力暂不进入应用代码，后续有实际流量需求时优先在 Nginx 或网关增加。
-
-### 验证结果
-
-- 17个验证码相关测试全部通过，其中包含本机 Redis 4号库的5个真实 Lua 集成测试。
-- 执行 `mvn clean verify` 成功：25个常规测试通过，5个需显式启用的 Redis 集成测试按设计跳过。
-- 执行 `git diff --check` 未发现空白错误。
-
-## 2026-10-27：建立面向用户的功能文档
-
-### 变更内容
-
-- 新增独立功能文档，用通俗语言区分当前可用、正在开发和尚未迁移的功能。
-- 将功能文档同步更新加入协作开发规则，后续功能变化必须同时维护。
-
-### 验证结果
-
-- 检查功能文档内容与当前已经开放的系统状态、注册验证码和密码重置验证码接口一致。
-
-## 2026-10-27：完成校园邮箱注册闭环
-
-### 变更内容
-
-- 开放用户注册接口，支持校园邮箱、验证码、用户名和密码创建普通用户账号。
-- 注册规则集中由服务端校验，密码使用 Spring Security BCrypt 哈希，注册成功不自动登录。
-- 用户与默认角色在同一 MySQL 事务中写入，并由数据库唯一约束处理并发重复注册。
-- 注册验证码在写入账号前一次性消费；Redis 或验证码校验失败时不允许创建账号。
-- 功能文档同步将用户注册更新为当前可用功能。
-
-### 验证结果
-
-- 新增注册协议、输入策略和业务编排测试，覆盖正常注册、非法输入、重复邮箱、无效验证码及并发唯一约束冲突映射。
-- 增加真实 MyBatis、H2 与 BCrypt 集成测试，验证密码哈希落库及角色分配失败时用户写入回滚。
-- 执行 `mvn clean verify` 成功：37个常规测试通过，5个需显式启用的 Redis 集成测试按设计跳过。
-- 显式连接本机 Redis 4号库执行注册相关测试，共16个测试全部通过，其中包含5个真实 Redis 原子性测试。
-
-## 2026-10-27：增加前端注册页面
-
-### 变更内容
-
-- 按现有米白、深灰和银杏黄色视觉风格增加响应式注册页面，并从首页和顶部导航提供入口。
-- 前端支持校园邮箱提示、验证码发送、60秒倒计时、用户名与密码即时校验、确认密码和注册结果反馈。
-- 注册请求状态进入独立 auth 模块，密码与验证码只保留在页面局部状态，不写入 Pinia 或浏览器存储。
-- Vite 与 Nginx 同时代理现有 `/api` 和 `/auth` 后端路径，不改写服务端接口地址。
-- 功能文档同步更新前端注册页面的使用方式。
-
-### 验证结果
-
-- 增加注册请求状态测试，覆盖验证码发送成功、错误提示及注册成功状态。
-- 执行 `npm run check` 成功：ESLint 通过，4个前端测试通过，TypeScript 检查和 Vite 生产构建通过。
-- 本次涉及的前端文件均通过 Prettier 检查；项目其余既有文件仍有待单独统一格式化，未在本步骤扩大修改范围。
-
-## 2026-10-27：增加本地敏感配置文件
-
-### 变更内容
-
-- 在后端外部 `config` 目录增加不会提交到 Git 的 `application-local.yml`，集中保存本机 MySQL、Redis 和阿里云邮件推送配置，且不会打包进 JAR。
-- 增加可提交的配置示例文件，真实 SMTP 发信地址、密码和验证码 HMAC 密钥继续使用占位符。
-- 本地启动命令显式启用 `local` Profile，避免开发凭据被其他环境误用。
-
-### 验证结果
-
-- 检查真实本地配置文件已被 Git 忽略，示例文件仍可正常纳入版本控制。
-- 执行跳过测试的 Maven 打包成功，并确认本地配置及示例文件均未进入 JAR。
-
-## 2026-10-27：配置本机验证码密钥
-
-- 使用密码学安全随机数生成器生成32字节密钥，以 Base64 格式写入本地验证码配置。
-- 密钥仅保存在被 Git 忽略的本地文件中，未写入示例文件或开发日志。
-- 校验密钥格式及长度，并确认本地配置仍被 Git 忽略；功能文档补充验证码保存方式。
-
-## 2026-10-27：初始化本地联调数据库
-
-### 变更内容
-
-- 创建本机 `ginkgo_food_map` 数据库，字符集采用 utf8mb4，沿用现有迁移脚本的排序规则。
-- 补齐 Spring Boot 4 的 Flyway Starter，使应用启动时能够自动执行和校验迁移。
-- 通过 Flyway 执行 V1、V2，建立业务表、迁移历史和默认角色，未创建测试用户或管理员账号。
-
-### 验证结果
-
-- 在本机 MySQL 8.0.34 确认两条迁移均成功，用户名和邮箱唯一索引存在，初始用户数为0。
-- 已有后端进程在数据库初始化后健康状态恢复为 UP。
-- 前端代理请求成功；执行 `mvn verify` 构建成功，37个测试通过，5个真实 Redis 集成测试按默认设置跳过。
-
-## 2026-10-27：完成用户名密码登录与当前会话退出
-
-### 变更内容
-
-- 在现有 `feature/user-auth` 分支完成登录功能闭环：登录、读取当前用户、退出当前会话及前端登录页面。
-- 使用 Spring Security Resource Server 验证 RS256 JWT，校验发行方、受众、有效期和必要声明；移除骨架阶段 HTTP Basic、表单登录和 HTTP Session 认证。
-- 每次登录创建独立 Redis 会话，受保护请求同时验证会话、最新账号状态、凭证版本和当前角色。退出立即撤销当前会话，其他会话继续有效。
-- user 模块通过公开应用服务提供身份快照和密码校验，不向认证模块暴露 Mapper、Entity 或密码哈希。
-- 登录错误按稳定用户ID摘要进行原子计数，默认15分钟内失败5次锁定15分钟；MySQL 大小写、重音不敏感的用户名变体共享限流。
-- 不存在账号、错误密码、未验证邮箱及停用账号使用相同失败提示；Redis 或数据库临时故障返回503，不绕过认证，也不误报服务端退出成功。
-- 修正方法级权限不足被原有兜底异常处理为500的问题，过滤器和方法级授权均返回统一403响应。
-- 前端凭证保存在当前标签页的 sessionStorage，刷新后向服务端恢复身份；密码仅留在表单局部状态。401清理对应凭证，503保留凭证供重试，旧请求不能清除新登录或恢复已退出身份。
-- 提供本机 RSA 密钥生成工具，拒绝覆盖已有文件；密钥目录被 Git 忽略且不打包进 JAR，测试使用运行时生成的内存密钥。
-- 同步更新功能说明、启动说明和前端依赖边界文档；未修改已执行的数据库迁移脚本。
-
-### 验证结果
-
-- 执行 `mvn verify` 成功，47个常规测试通过；新增认证集成测试覆盖真实 BCrypt、Mapper、JWT 签名及安全过滤链、越权、撤销、版本失效、限流响应和基础设施故障。
-- 显式启用 `redis.integration`，8个真实 Redis 测试通过，包含3个登录并发计数、会话独立撤销及自动过期测试。
-- 显式启用 `auth.integration`，9个真实 MySQL、Flyway 与 Redis 接口测试通过，包含注册到登录退出完整流程及用户名大小写、重音别名的限流检查。仅使用测试创建的随机临时数据库，邮件发送器被替换，测试完成后清理临时数据库和自有 Redis 键。
-- 执行 `npm run check` 成功：ESLint、19个前端测试、TypeScript 类型检查和 Vite 生产构建通过。测试包含实际 Vue 表单提交、密码清理、登录跳转、状态恢复以及旧请求竞态。
-- 使用打包后的 JAR、本地配置和本机生成的 RSA 密钥在独立18080端口启动成功；公开状态接口返回200，空登录请求返回400，匿名当前用户查询返回401；验证结束后关闭该验证进程。
-- 本次涉及的前端源码通过 Prettier 检查；`git diff --check` 通过，RSA 密钥确认被 Git 忽略。
-
-### 尚未完成
-
-- 查看及管理其他设备会话、使用验证码设置新密码、刷新令牌及安全审计事件写入尚未实现。
-- 本阶段未做浏览器端到端视觉验收；页面交互由真实 Vue DOM 测试验证，完整认证流程由后端接口集成测试验证。
-
-## 2026-10-27：建立持续维护的接口文档
-
-### 变更内容
-
-- 新增 `docs/api.md`，按现有 Controller、DTO、Service、安全配置和错误码核对验证码、注册、登录、当前用户、退出及状态接口，补充Actuator与Nginx探针的访问差异。
-- 说明统一响应、认证规则、参数默认限制、验证码配额及一次性消费、登录限流、退出重试、完整错误码索引和PowerShell联调示例；明确未实现能力，不承诺计划中的接口。
-- 在README与功能说明中添加接口文档入口，将接口文档同步维护加入AGENTS开发规则。
-
-### 验证结果
-
-- 静态核对7个已实现业务路由及其方法，确认均被接口总览覆盖，认证要求与安全白名单一致。
-- 核对当前错误码枚举及安全处理器，确认23个错误码均被索引覆盖；检查JSON示例语法、Markdown本地文件链接和Git空白错误。
-- 本次仅修改文档及维护约定，不执行邮件发送、账号创建或登录请求，未重新运行构建和业务测试。
-
-## 2026-10-27：准备 develop 自动检查发布并清理服务器旧应用
-
-### 变更内容
-
-- 在独立 `feature/ci-cd` 分支配置 GitHub Actions，仅处理 develop 推送；前后端和部署测试全部通过后发布本次检查产物，发布前跳过已被新提交取代的版本。
-- 增加发布包校验、串行锁、原子版本链接切换、systemd 重启与页面/API/认证/版本健康检查。失败尝试恢复上一版程序，明确不自动撤销数据库迁移。
-- 按用户授权清理 `8.137.98.235` 的旧 Java 应用、自动发布服务、业务容器和专属中间件；保留 MySQL、Redis 容器、持久化卷和原数据库，未删除本地项目。
-- 服务器准备 Java 21、独立应用/部署账号、Nginx、systemd、专用数据库账号及服务端密钥；GitHub 部署 Secrets 已配置，部署账号仅有新项目服务的重启/停止权限。
-- 新增部署文档，更新功能、接口及 README 入口，并固定 Bash 脚本 LF 换行。
-
-### 验证结果
-
-- Maven verify 显式启用真实 MySQL、Redis 集成测试，64个测试全部通过；前端 npm run check 通过，包含19个测试、ESLint、类型检查及生产构建。
-- actionlint 1.7.7 和 Bash 语法检查通过；11个部署及健康检查测试在 Ubuntu 临时目录通过，未切换正式服务。
-- Nginx 配置和 systemd 单元静态校验通过，独立 SSH 部署账号及 sudo 限制验证通过；旧应用路径已不存在，保留的数据库和 Redis 容器健康。
-
-### 当前状态与待验收
-
-- 修改尚未提交或推送，原有登录注册工作仍保留在工作区；没有执行 GitHub Actions 或首次正式发布。
-- 新站点当前返回503等待首个发布，后端服务已设为开机启动但尚未运行。审核后合并并推送 develop，需再验收真实 runner、正式发布及页面访问。
-- 当前仅 HTTP，发布重启存在短暂中断；历史产物需后续按磁盘情况人工维护。详细运行结构和回滚边界见 `docs/deployment.md`。
-
-## 2026-10-27：迁移到独立 V2 仓库
-
-### 迁移范围
-
-- 按用户要求创建 `kanno111/ginkgo-food-map-v2`，默认分支为 develop，以原 develop 的 V2 文件快照作为新历史的根提交，再提交当前登录、注册和 CI/CD 修改。
-- 根提交文件树与原 develop 一致；不迁入更早的旧系统提交，原远程仓库继续保留。
-- 本地源文件及被忽略的运行配置保留；旧 Git 元数据单独备份，本地 origin 指向新仓库，legacy 指向原仓库。
-- GitHub 部署 Secrets 在新仓库单独配置，首次推送 develop 将触发检查和自动发布。实际发布状态以 Actions 和站点版本号为准。
-
-### 验证与记录
-
-- 核对新根提交的文件树与原 develop 完全一致；检查当前版本候选文件，不包含本机配置、私钥、日志和构建产物。
-- 沿用迁移前已通过的64个后端测试、19个前端测试、11个部署测试及构建结果；迁移只调整仓库历史和文档，真实 runner 验证由首次推送执行。
-- 新历史将产生新的提交号，不保留原提交号；原开发日志中的分支与未发布状态属于各阶段的历史记录。
+# 当前开发记录
+
+## 2026-10-30：整理一次本地提交
+
+- 按用户要求，在现有feat/review-replies分支将累计开发成果整理为一次本地提交：点评发布与最新代表计分、最多五图上传/绑定/访问/回收、作者分组与历史分页、单层回复及简化交互、首页目录展示、模块职责调整、测试与文档归档。上述功能存在依赖，不单独提交回复组件而遗漏其读取、上传和公开作者服务。
+- 提交依据为此前完成的前端201项测试、ESLint、TypeScript及生产构建，以及后端verify打包成功（299项中226通过、73项显式条件跳过）；真实数据库回复测试15项全部执行通过。浏览器桌面/手机检查和模拟提交证据见前述记录，真实持久化发送及跨设备验收不因此补记为完成。本轮未改业务实现，无需重复相同构建测试。
+- 核对待纳入版本控制的文件未匹配当前本地配置及环境中的敏感值，无大体积构建产物；本地配置、密钥目录、node_modules、target和dist继续被忽略。只做本地提交，不新建分支、不合并、不推送或部署。
+
+## 2026-10-30：简化点评操作与历史面板
+
+- 用户指出三个折叠框层级混乱，调研后确认按“正文直接展示、一行操作、按需编辑”修改。在原feat/review-replies分支完成，没有新建分支。移除每卡“评价依据”、常驻黄色回复容器、排序说明及刷新按钮，主卡只保留“回复 / 查看回复 / 历史点评”操作；接口没有回复总数，不伪造数量。
+- 回复阅读和编辑独立，点击回复才显示编辑器，同一列表和历史面板共享编辑焦点，只显示一个编辑框。取消或切换保留草稿及失败UUID；账号变化清空。回车发送、Shift+回车换行，输入法候选字确认不发送；成功后关闭自己的编辑框、只刷新当前回复区，保留主列表位置。失败重试及已发送但刷新失败提示继续保留。
+- 历史点评通过原生dialog展示，桌面560px右侧面板、640px及以下为88dvh底部面板；Teleport到body，原生模态焦点约束配合背景滚动锁。关闭、Escape和卸载均取消读取并恢复滚动，焦点回原入口；保留已读历史及回复草稿。隐藏面板内的回复读取也取消；历史照片仍由原大图对话框显示，关闭大图后回历史面板。
+- 修改文件及用途：frontend/src/modules/review/ui/ReplyThread.vue重构轻量操作、阅读和编辑；ReviewHistory.vue改为可访问的响应式历史面板；ReviewEntry.vue移除依据区并把历史入口接入操作行；ReviewPanel.vue提供共享编辑焦点并移除重复底部说明。新增model/replyEditor.ts定义编辑焦点和历史可见性的注入协议；更新model/replyThread.spec.ts与reviewHistory.spec.ts验证切换草稿、只开一个编辑框、隐藏读取取消、历史缓存/分页、焦点与滚动恢复。同步features、api、requirements、discovery-ui、review-roadmap及本日志。
+- npm run check通过：ESLint、201项前端测试、TypeScript及生产构建；最后仅调整编辑框焦点样式后再次build通过。git diff --check通过。后端接口和数据库未修改，本轮未重复运行后端测试。
+- Edge真实检查1440/390/320px：主卡零details、默认隐藏编辑器，操作行排布正常；桌面右侧/手机底部面板边界和宽度正确，无横向溢出。真实回复GET三次成功，历史5+1分页和重开缓存、照片大图、Escape/关闭后的入口焦点与原滚动位置验证通过。独立浏览器模拟账号及两次被拦截的POST，验证单编辑框、当前/历史草稿切换与关闭重开保留、同UUID失败重试、成功后刷新失败及只重试读取、HTML纯文本；零真实业务写入、零脚本错误。截图和facts位于D:/eat/.codex-backups/ginkgo-browser-check/artifacts/review-replies-redesign/，脚本为review-replies-redesign.cjs，前端验证日志为D:/eat/.codex-backups/reply-redesign-check.log。
+- 前端5173已热更新，后端8080保持健康，http://127.0.0.1:5173/restaurants/20可继续联调。真实持久化发送与跨设备验证仍待用户；未提交、推送、合并或部署。
+
+## 2026-10-30：回复前端接入并重启联调服务
+
+- 回复后端经用户审核通过后，在原feat/review-replies分支接入前端，未新建分支。最新点评和按需加载的历史点评共用ReplyThread；每条点评展开后单独读取10条回复，按服务端游标追加，折叠/卸载取消读取；账号或点评变化清空旧草稿、取消请求并通过代次忽略旧响应。
+- 发布固定发起账号凭证及同内容UUID，失败保留文字和编号；正文变更后生成新号。校验回执后才确认发送、清草稿，局部刷新回复第一页，保留外层点评页和历史展开，不触发评分刷新。成功回执与读取失败分别提示，读取重试不重新POST；HTML以插值纯文本显示，1–200码点校验、中文输入法回车保护和发送中防重均保留。长讨论发送后可继续加载更多，未伪造本地已发布记录。
+- 修改文件及用途：新增frontend/src/modules/review/ui/ReplyThread.vue管理回复生命周期；ReviewEntry.vue接入新组件并保留独立预览，ReviewHistory.vue开放原点评回复，ReviewPanel.vue更新开放状态提示；model/review.ts定义分页/回执和可选读取能力，api/reviewApi.ts接GET/POST与响应校验；shared/api/httpClient.ts将精确回复GET列为匿名，POST继续认证。新增model/replyThread.spec.ts，更新api/reviewApi.spec.ts和shared/api/httpClient.spec.ts。同步features、api、review-roadmap、review-backend和本日志。
+- npm run check通过：ESLint、196项测试、TypeScript及生产构建。新增11项组件生命周期及3项API测试，覆盖按需/游标、失败保留/正文变化换UUID、成功后刷新失败、折叠/换店/换账号晚到响应、Unicode、IME、防重、登录返回和纯文本；拦截器测试验证公开GET匿名、回复POST认证。后端本轮未修改，复用此前完整verify通过且包含ReplyController的JAR。
+- 按用户要求重启后端8080和前端5173，后端使用当前已验证JAR副本及既有local配置，前端使用当前源码Vite；后端健康UP、前端HTTP200，通过5173代理真实读取餐厅20的点评34和回复成功。新进程后端PID29236、前端PID14696，日志、PID及JAR副本位于仓库外D:/eat/.codex-backups/ginkgo-food-map-v2/review-replies-dev-start/；未输出或修改本地凭证。
+- Edge在1440/390/320px真实检查最新/历史点评回复，六次真实回复GET成功，无横向溢出或脚本错误；游客登录返回正常。登录及发送流程使用浏览器拦截模拟，验证历史点评33的失败后同UUID重试、发送成功但刷新失败的独立提示、仅重试读取、历史保持展开及HTML纯文本；两次POST全部被拦截，零真实业务写入。截图、facts.json和脚本位于D:/eat/.codex-backups/ginkgo-browser-check/artifacts/review-replies/及review-replies-check.cjs；不能将模拟发送记为真实持久化发布。
+- 服务保留供用户通过http://127.0.0.1:5173/restaurants/20进行前后端联调；真实持久化发送与跨设备验证仍待用户操作。未提交、推送、合并或部署；删除功能、评分聚合和照片墙待各自后续步骤。
+
+## 2026-10-30：清理本地分支与调整建分支规则
+
+- 按本轮分支整理要求，核对所有本地分支均已被当前HEAD包含后，用git branch -d删除9个多余本地分支，仅保留develop和当前feat/review-replies。没有重写提交历史、删除远端分支或清理未提交的代码。
+- AGENTS.md修改协作约定：每次新建分支都必须先说明名称、基线和用途，并取得用户明确同意；不得因进入新功能或新阶段而自动创建分支。
+- 验证本地仅剩上述两个分支，未提交文件数量仍为116；AGENTS.md文本差异检查通过。本轮仅调整Git引用和开发约定，不涉及业务代码、接口或数据库，无需重跑构建测试。
+
+## 2026-10-30：单层回复后端
+
+- 从当前feat/home-ui-refresh基线新建feat/review-replies，保留工作区已有未提交改动。本步交付回复POST和公开GET游标分页，正式前端仍关闭回复，下一步再接主卡、历史卡和局部刷新。
+- 复用V4的review_replies、账号+UUID唯一键及点评/时间/ID索引，无新迁移。1–200个Unicode码点纯文本，首尾Unicode空白归一；作者取登录上下文，未知字段拒绝。摘要包含规范化正文与点评ID，同请求重放返回原ID，不同内容409。
+- 父店锁后再锁点评，与删店互斥；restaurant公开服务抽出仅锁父店的入口，回复不初始化或修改统计、不改点评时间。并发唯一键/锁/查询超时最多三个完整READ_COMMITTED事务，失败先回滚再重试，单次事务超时10秒。代价是同店写入串行，未声称吞吐提升。
+- 单层回复绑定具体reviewId，保留旧点评归属。升序(createdAt,id)排他游标带版本和点评归属，核对真实锚点；单段REPEATABLE_READ，公开作者批量补齐，缺失账号保留ID及回退名。新回复时间不早于上一条，避免时钟回拨漏过游标；跨段非固定快照，无推送。未来删除仍需明确幂等键生命周期，当前回复不承诺删除后永久防重。
+- 新增ReplyPolicyTest和ReplyApiIntegrationTest，真实MySQL8.4.0在独立回环3319实例及随机库测试，不读取local配置、不写业务库、不请求OSS或邮件；详细验证结果见本节后续记录。
+- 本步文件清单（相对backend/src/main/java/com/ginkgo/foodmap）：review/controller/ReplyController.java提供两个HTTP入口；review/dto/ReplyPublishRequest.java与ReplyListQuery.java定义受限输入；review/vo/ReplyPublishVo.java与ReplyPageVo.java定义回执/公开分页；review/entity/ReplyEntity.java隔离持久化投影；review/mapper/ReplyMapper.java负责本模块SQL；review/policy/ReplyPolicy.java负责规范化、摘要和游标；review/exception/ReplyErrorCode.java定义回复错误；review/service/ReplyWriteService.java与ReplyReadService.java负责事务流程。另修改restaurant/service/RestaurantReviewApplicationService.java分离父锁与统计初始化，security/config/SecurityConfiguration.java显式公开GET。
+- 测试文件为backend/src/test/java/com/ginkgo/foodmap/review/ReplyPolicyTest.java和ReplyApiIntegrationTest.java。文档更新docs/api.md、docs/features.md、docs/plans/review-roadmap.md、docs/plans/review-backend.md及本文件；前端、现有迁移均未修改。
+- 最终验证：Java21 + 独立MySQL8.4.0，`mvn --batch-mode --no-transfer-progress verify '-Dreview.integration=true'`成功并打包可执行JAR。共299项、226通过、0失败/错误、73跳过（未开启其他领域的显式集成开关），不能记为299项全部实际执行。新增回复12项真实数据库/认证接口测试及3项规则测试全部通过；原点评发布、分组/历史读取及评价结构测试亦执行通过。覆盖并发同UUID/跨店冲突、插入后故障回滚与有界重试、删店互斥、历史归属/不计分、Unicode、游标同时间分页/失效、时钟回拨及缺失作者。`git diff --check`通过；没有前端改动，未运行前端构建或浏览器验收。
+- Maven原始日志位于仓库外`D:/eat/.codex-backups/reply-verify.log`；测试随机库已清理，本轮3319专用实例在验证结束后关闭。未提交、推送、合并或部署；正式前端回复接入及删除功能仍待完成。
+
+## 2026-10-30：首页视觉优化
+
+- 从feat/review-history创建feat/home-ui-refresh，保留现有未提交工作。修改真实首页、目录、卡片和随机展示：紧凑搜索分类，移除未开放的禁用筛选按钮，低频条件收纳，桌面三列、中屏两列、手机单列，上图下文；浅黄随机横条保留抽取逻辑，PC与手机底部导航保留。
+- 点评模块新增公开的useRestaurantReviewPreview，复用现有公开读取，一店只读第一页，当前目录最多8店；读取真实总条数和已有配图，模拟图标注非实拍。不扫描历史或聚合评分；取消与代次保护阻止旧响应覆盖，失败区分于真实零条。代价为每页最多8次辅助请求，专用封面接口另行设计。
+- 修改HomePage.vue、RestaurantCatalog.vue、RestaurantCard.vue、RandomRestaurant.vue和review/index.ts，新增读取逻辑及3项生命周期测试；同步features和discovery-ui。后端及数据库未改，未提交推送。
+- npm run check通过：ESLint、182项前端测试、TypeScript及生产构建。Edge实际检查1366/768/390/320px，无横向溢出和脚本错误；桌面首卡从440px开始、底栏从702px开始。真实接口验证搜索、分类、更多筛选、排序、分页、随机与预算、详情返回；拦截GET验证目录错误重试和图片失败回退，无业务写入。截图及事实记录在仓库外ginkgo-browser-check/artifacts/home-refresh/。
+
+## 2026-10-30：C1历史点评按需展开与同店分页联调
+
+- 从feat/review-list-ui新建feat/review-history，保留既有未提交工作，完成C1后端与前端。新增公开GET /api/restaurants/{restaurantId}/reviews/authors/{authorId}/history；默认5条、最多20条，以微秒时间+ID排他游标翻页，不把历史全量嵌入主列表。主列表有历史时返回nextHistoryCursor。游标限定版本/规范编码/路径归属，并核对真实锚点与时间；不把公开分页参数当授权凭证，不引入签名密钥或迁移。
+- 单段父店可见性、当前代表、游标锚点、正文、公开作者和有序照片使用同一REPEATABLE_READ只读快照。当前代表变化时，前端丢弃历史并刷新当前页；页面不主动推送更新。首次展开才请求，每段5条，更多、折叠取消、重开缓存、失败原游标重试、卸载忽略晚到结果均实现。历史卡保留原记录评分、时间、正文及照片，大图沿用既有接口。
+- 新增/修改文件用途：review/dto/ReviewHistoryQuery及ReviewHistoryBoundary定义参数和边界，policy/ReviewHistoryCursorPolicy负责游标校验，vo/ReviewHistoryVo定义响应；ReviewReadMapper/Service/Controller与SecurityConfiguration提供公开只读流程，ReviewPageVo与ReviewErrorCode补充协议。前端review/model/review.ts和api/reviewApi.ts定义历史传输与响应校验，ReviewHistory.vue管理按需请求与取消，ReviewEntry.vue新增历史插槽，ReviewPanel.vue接入并刷新，ReviewComposer.vue更新回执文案；httpClient.ts将精确历史GET列入匿名请求。ReviewReadApiIntegrationTest、reviewHistory.spec.ts、reviewApi.spec.ts及httpClient.spec.ts验证边界，既有review.spec.ts改用trim匹配格式化后的按钮文本。
+- 前端npm run check通过：ESLint、179项测试、TypeScript及生产构建。后端Java21、隔离MySQL8.4.0、Redis完整verify共352项，351项实际执行通过，1项显式关闭的OSS-live测试跳过；0失败/错误。13项真实点评读取集成测试包含默认5条/尾段、同时间ID边界、作者/餐厅隔离、锚点与参数错误、无记录、父店可见性、五图和私密字段、代表变化及并发提交快照。OSS-live跳过不等于本轮真实照片未验证：开发库补充样例的12张历史照片逐条真实GET通过。
+- EXPLAIN/ANALYZE使用30作者×50条同时间记录，结果生成backend/target/review-history-explain.txt；该小样本选择作者索引并排序，未强制复合索引，不声称常数开销、吞吐量或提升幅度。既有B1查询计划也在本轮重跑。
+- 经用户授权，继续用两模拟账号各向开发餐厅20实际发布6条带图点评，共增加12条/12张新上传；复用之前审核过的Commons照片，每条恰一张并保留作者/许可证/来源及“联调模拟、非本店实拍”标识。现在每账号16条点评、16张照片、10家餐厅，餐厅20各7条（6历史）；实际接口验证历史5+1分页、无主卡重复、12张照片均200/JPEG。UUID、文件ID与进度持久化在仓库外seed_history_reviews.py/history-progress.json，验证在history-verification.json；更新photo-credits.md。不改变账号角色，结束注销脚本会话，不输出凭证。
+- Edge真实浏览器在1440/390/320px通过：未展开零请求、5条+1条、折叠重开不重复请求、每历史卡一图并加载成功、历史照片大图、无横向溢出。代表变化与503重试采用拦截响应验证，无额外真实写入；页面无运行时错误。脚本和截图位于D:/eat/.codex-backups/ginkgo-browser-check/review-history-check.cjs及artifacts/review-history/。
+- API第16节、features、review-backend/review-roadmap及review-schema同步完成状态。后端8080使用本轮验证的JAR副本重新启动，前端5173热更新，保留服务供用户联调；未提交/合并/推送。餐厅四维/聚合统计仍按要求暂缓，C2本人上下文/预测、回复、删除及独立照片墙仍待后续步骤。
+
+## 2026-10-30：创建两个模拟账号并发布20条单图点评
+
+- 按用户明确要求向当前回环3306的ginkgo_food_map开发库添加模拟数据，不连接生产。创建“模拟食客_小林_1030”和“模拟食客_小周_1030”，各仅授ROLE_USER；使用保留.invalid邮箱通过本地数据初始化建立可登录模拟账号，不发送验证邮件、不修改注册或认证代码。密码使用BCrypt，登录信息仅保存在仓库外credentials.json，日志不输出密码/令牌。
+- 从Wikimedia Commons挑选20张开放授权美食照片，包含饺子、炒饭、火锅、面食和甜点；下载后视觉核对，缩放/转JPEG，均满足1200px及300KiB限制。每条正文注明联调模拟、非真实体验、配图非本店实拍，并保留作者、许可证、来源页面和缩放说明；完整来源清单保存在本地photo-credits.md及photo-sources.json。
+- 选取10家仍营业且带“联调模拟”标签的现有餐厅（ID20、8、10、16、19、15、23、12、18、22），两个账号各在每家发布1条，共20条。账号创建后实际登录，全部图片上传与点评发布走现有认证HTTP接口，真实写入开发OSS并绑定；每条仅1张照片。请求UUID、文件ID和点评ID持久保存，发布可按同次编号重放，未直接插入点评或修改既有记录。
+- 数据增量核对为用户+2、点评+20、照片关联+20、媒体+20、餐厅+0；每个模拟账号均为10条/10家/10张，普通用户角色。20个正式图片地址全部返回200且为JPEG，分组读取正确识别两个作者。完成后撤销脚本登录会话，用户仍可自行登录。
+- Edge在1440/390/320px真实读取新增账号的点评和照片，每个模拟主卡恰好1图，模拟标识与来源可见，无横向溢出或浏览器错误。本轮不改业务代码、不迁移数据库、不提交推送，未重跑单元/构建；验证依据为实际发布、数据库增量、20张云图读取与浏览器检查。
+- 本轮仅更新本日志及功能说明中的联调数据状态。账号登录信息、基线/增量、图片/来源、请求进度与验收结果位于仓库外D:/eat/.codex-backups/ginkgo-food-map-v2/demo-reviews-20261030/；页面截图位于ginkgo-browser-check/artifacts/demo-reviews-20261030/。模拟数据有意保留供用户联调，餐厅聚合统计前端仍按要求暂缓。
+
+## 2026-10-30：接入真实点评列表，暂缓餐厅四维统计
+
+- 按用户要求从feat/review-read新建feat/review-list-ui，先完成B3的点评读取部分，B2餐厅综合分/推荐率/四维聚合统计暂缓。详情页读取公开作者组分页，每页8位同学，显示人数与点评总条数、当前主卡、服务端单条分数、历史数量和按顺序排列的照片；照片可查看大图，不把本页照片当作全店照片墙。
+- 正式GET不带旧Bearer，不推断作者管理权限；隐藏未开放的回复输入与删评入口，历史数量明确提示尚不可展开。预览传输同步分页模型，示例历史仍独立保留。上方餐厅统计区保持空评分，条数改为“待接入”并说明汇总尚未启用，避免已有点评时仍声称0条或没有评价。
+- 列表支持上一页/下一页、刷新回第一页、失败原页重试、真实空态；切店或发布修订会取消旧请求并忽略晚到响应。发布成功保留编号回执，完成或关闭后只刷新点评第一页，不卸载整个详情或回填乐观假列表。首页发布后可进入餐厅详情读取。
+- npm run check通过：ESLint、173项前端测试、TypeScript与生产构建全部通过。新增5项行为测试覆盖B1映射与五图顺序/URL、畸形响应、分页/发布重置、原页重试和切店取消；既有预览、草稿与同号重试回归通过。后端代码未改，未重跑后端测试，不将此前347项当成本轮执行。
+- Edge真实浏览器在1440/390/320px读取本地餐厅20已有2条/1人记录及正式OSS照片，大图可打开、页面无横向溢出；独立历史预览仍可展开。另用拦截响应验证两页、读失败/重试/空态、发布503保留正文与UUID、成功回执保留及关闭后回第一页。写请求全部拦截，未向业务库新增测试点评或上传图片，未冒称真实正向发布持久化验收。浏览器错误0，截图和事实记录在仓库外ginkgo-browser-check/artifacts/review-list-ui；检查日志为review-list-ui-check.log。
+- 本轮修改review/model/review.ts及api/reviewApi.ts、ReviewPanel.vue、ReviewEntry.vue、ReviewComposer.vue、ReviewHistoryPreview.vue，实现统一分页与真实展示；RestaurantDetail.vue接发布修订并澄清统计待接入；shared/api/httpClient.ts放行匿名点评GET。review.spec.ts、api/reviewApi.spec.ts、shared/api/httpClient.spec.ts验证相应行为；api/features/两份计划及本日志同步状态。后端8080与前端5173保持运行，Vite已热更新，未改数据库、提交或推送。
+
+## 2026-10-30：启动B1前后端联调环境
+
+- 按用户要求启动最新B1后端8080和Vite前端127.0.0.1:5173；后端使用已通过verify的JAR副本、local Profile及被Git忽略的本地配置。Redis6379从原redis-local持久化目录恢复；原MySQL3306保留，Flyway校验V1–V7通过，实际新增迁移0项。
+- 首页、状态、餐厅目录及经Vite代理的点评GET均200；餐厅20已有2条点评，返回1位作者的最新主卡，验证B1已加载。非法每页数量400、不存在餐厅404、匿名/auth/me为401；Redis PONG。不发布测试点评、不上传图片或发送邮件。
+- 本轮只补充启动记录，不修改业务代码或重复运行全套测试。服务保持运行供用户联调；点评列表页面仍待B3接入，当前可直接请求分组GET。运行日志与后端副本位于仓库外D:/eat/.codex-backups/ginkgo-food-map-v2/review-read-dev-start/，未提交或推送。
+
+## 2026-10-30：B1公开点评按作者分组读取
+
+- 从feat/review-images新建feat/review-read，保留原有未提交成果。新增公开GET /api/restaurants/{restaurantId}/reviews，每页默认8组、最多50组；按账号ID选最新代表后分页，返回独立人数、总条数、每人历史条数、单条评分/杯型及最多五个有序照片引用。nextHistoryCursor为空，历史展开留待C1；B2餐厅统计和B3页面读取仍未实施。
+- 父店可见性、计数、分页、公开作者及照片共用REPEATABLE_READ只读快照。非空页5条SQL，空页2条，作者和照片各一次批量查询；不跨模块JOIN、不加载用户凭证或OSS信息、不调用云端或持写锁。缺失账号保留逻辑ID并显示统一回退名，停用账号不抹掉已发布署名。
+- 新增9项真实MySQL读取测试和10项杯型边界测试。首轮修正测试夹具本地Timestamp时区转换，以及对抽象Mapper使用callRealMethod的错误拦截方式；改为LocalDateTime夹具和父店服务建立快照后独立连接提交，验证计数/主卡/署名一致。定向20项（含结构边界）通过。
+- 完整mvn verify开启review/restaurant/auth/redis集成，最终报告348项：347项实际执行通过、0失败/错误，1项真实OSS上传测试未启用；JAR成功。首次完整回归因临时Redis的MSYS路径解析未启动而失败，修复启动路径并确认PONG后重跑通过。未访问真实OSS或发送邮件；未改前端，不重复运行前端检查。
+- MySQL8.4.0、Java21和临时Redis8.6.1在独立回环环境验证；核对随机库已全部清理后关闭本轮临时MySQL/Redis。EXPLAIN/ANALYZE覆盖30位作者、30/300/1500条历史，实际出现全表扫描、窗口临时表及排序，未宣称索引命中或吞吐提升；取舍与复现入口见结构文档第12节。完整日志、执行计划保存在仓库外review-read-check目录。6份文档的44个本地链接/锚点、21个JSON示例及空白检查通过。
+- 本轮无新迁移，未操作开发/生产业务库、重启开发前后端、提交或推送。接口/功能/路线图/后端计划/结构及本日志同步B1完成、B2/B3待办；本地现有服务不会自动加载新JAR。
+
+本轮文件与用途（路径相对于backend/src/main/java/com/ginkgo/foodmap，测试相对于backend/src/test/java/com/ginkgo/foodmap）：
+
+| 文件 | 用途 |
+| --- | --- |
+| review/controller/ReviewReadController.java、review/dto/ReviewListQuery.java | 公开HTTP入口、分页校验及字段绑定白名单 |
+| review/service/ReviewReadService.java、review/policy/ReviewReadPolicy.java | 一致快照流程、展示组装、ID校验和杯型阈值 |
+| review/entity/ReviewReadEntity.java、review/entity/ReviewCountsEntity.java、review/entity/ReviewPhotoReferenceEntity.java | 点评、计数及照片关联的内部持久化投影 |
+| review/mapper/ReviewReadMapper.java、review/mapper/ReviewPhotoMapper.java | 作者代表分页与计数、批量有序照片关联 |
+| review/vo/ReviewPageVo.java、review/exception/ReviewErrorCode.java | 显式公开响应白名单、读取ID错误码 |
+| user/dto/PublicAuthor.java、user/mapper/PublicAuthorMapper.java、user/service/PublicAuthorService.java | 用户模块公开作者批量查询，仅包含ID和用户名 |
+| security/config/SecurityConfiguration.java | 仅放行主列表GET，不放行历史或本人上下文 |
+| review/ReviewReadApiIntegrationTest.java、review/ReviewReadPolicyTest.java | 真实MySQL/安全/快照/分页/隐私/照片顺序及阈值验证、生成执行计划 |
+| docs/api.md、docs/features.md | 第15节正式契约与使用边界 |
+| docs/plans/review-backend.md、docs/plans/review-roadmap.md、docs/architecture/review-schema.md、docs/development.md | 实施状态、后续步骤、查询成本与本轮验证记录 |
+
+## 2026-10-30：接续历史会话规划点评阅读闭环
+
+- 根据会话01a187c8-ed4f-70a2-b34f-f572e5e1fc19、当前源码及已有日志核对：五图发布、OSS上传/绑定/正式读取/清理已实现；正式点评list仍提示尚未开放，餐厅读取仍返回空评分。修正路线图与后端计划中图片尚未实现、file无业务服务及旧预测公式仍启用等过期状态。
+- 将B步拆为B1按作者分组读取后端、B2餐厅真实统计/筛选排序、B3前端分页/图片展示/发布刷新；下一次最小交付限定B1及必要批量作者查询、照片关联读取和隔离测试。后续依次推进C1历史、C2本人预测、回复、含请求防重的删除、独立照片墙与榜单联动，保留统计重建待办。
+- 路线图维护顺序与完成边界，后端计划维护协议、模块职责和分步验收。本轮只修改这两份计划与当前日志；未实现接口、修改数据库或重启服务。接续会话01a18abf-ddd6-7551-a511-0f79b5aceca6完成收尾校验：3份文档的16个本地链接（含章节锚点）、1个JSON示例及行尾空白检查通过，git diff --check通过。业务代码未变，未重跑前后端测试，不将历史329项后端/168项前端结果记为本轮执行。
+
+## 2026-10-29：缩略图右侧新增入口及五张图片上限
+
+- 按用户要求，ReviewComposer未选图显示上传框，选图后在同一区域切换为缩略图和80×80方形加号，移除按钮保留；满五张隐藏加号，移除后恢复，手机端自动换行。useReviewPhotos与前端公开模型统一五张上限，失败重试、本地预览和取消清理保持原语义。
+- 后端ReviewPublishPolicy最多5个有序文件ID，ReviewPhotoService允许位置0–4；V7仅扩展review_photos位置约束和注释，保留旧迁移。新增V6有两张图片时升级、五图有序绑定及第五图访问/第六图拒绝验证；既有迁移数量断言同步。
+- 完整mvn verify开启全部集成及真实OSS测试，329项实际执行，0失败/错误/跳过，JAR成功。前端168项、ESLint、类型及构建通过；Edge在1440/390/320宽验证单图右侧方形加号、五图隐藏、移除补图、超限拦截、顺序及重试，截图视觉复核通过。浏览器云请求使用替身，未向业务库发布测试点评。
+- 本地开发库从V6升V7，升级前后的业务表指纹一致，已有27家餐厅和1条点评保留；新后端已加载，前端由Vite热更新，代理及匿名上传401检查通过，用户刷新5173可继续联调。临时测试库与MySQL已清理。
+- 本轮修改ReviewComposer、review模型/useReviewPhotos及测试、ReviewPublishPolicy、ReviewPhotoService、V7迁移、图片/结构集成测试，需求/接口/功能/结构/范围和本日志同步；未提交或推送。证据位于仓库外five-photo相关日志、构建和截图，以及local-v7-upgrade快照。
+
+## 2026-10-29：本地V6升级并启动真实OSS联调服务
+
+- 用户授权升级并启动前后端。本地回环3306的ginkgo_food_map从V5升到V6，Flyway实际执行1项；27家餐厅、1条点评、其他业务表及全部业务数据指纹与升级前一致，未发布测试点评或上传业务图片。媒体结构快照和指纹保存在仓库外local-v6-upgrade目录。
+- 使用当前源码和本地OSS凭证重新打包到仓库外oss-dev-build，核对旧进程后切换8080后端和5173前端；后端local Profile加载被忽略的application-local.yml，Vite固定端口。MySQL/Redis原实例保留，日志不输出配置或密钥。
+- 新服务检查：公开状态200、前端首页200、餐厅GET代理200，匿名上传/取消401，不存在的正式照片404。正向真实OSS及JWT/隔离MySQL接口已在上一轮验证，本轮不冒称向业务库正向发布验收。
+- 当前页面可登录后选图、本地压缩预览、上传与带图发布。点评列表、历史、照片墙及统计展示仍未接通，成功回执与照片访问接口不等于阅读闭环。未提交或推送。
+
+## 2026-10-29：开发Bucket真实上传验收
+
+- 用户保存本地RAM配置后要求测试上传。本轮只读取配置有效性，不输出ID/Secret，不提交local配置。真实ginkgo-bucket/成都SDK探针复用项目配置、图片处理器和存储适配：上传48×32 JPEG成功，下载字节完全一致，删除后检查对象不存在；只操作本次随机review-images/smoke对象。
+- 新增显式oss.live开关的OssLiveUploadIntegrationTest，使用真实OSS、RS256/JWT及回环3316独立MySQL随机库，替换Redis会话依赖但不绕过数据库账号状态。multipart上传201，媒体TEMPORARY及尺寸正确，真实OSS读取成功，他人取消404，本人取消204，媒体记录删除，点评数0。1项实际执行，0失败/错误/跳过。
+- 测试自行清理登记的云对象与随机库；实际业务库未写文件/点评、未执行其V6迁移，现有8080后端未重启，页面联调仍需加载新版本。云探针、依赖路径及日志位于仓库外OssLiveSmoke.java、oss-live-classpath.txt、oss-live-api.log。未提交或推送。
+
+## 2026-10-29：允许在未跟踪的local配置中保存OSS凭证
+
+- 按用户要求，OSS支持app.file.oss.access-key-id/access-key-secret本地成对配置，显式配置优先，都留空时沿用SDK环境变量；部分填写直接拒绝，避免意外切换身份。两个敏感字段排除Lombok toString，不输出完整本地配置。
+- 本机application-local.yml保留其他配置与已有凭证，设置截图中的ginkgo-bucket及成都Region/HTTPS Endpoint，缺失凭证留空供用户填写。已确认文件未被Git跟踪且命中.gitignore；不在example中填写真实密钥。
+- 修改OssProperties、OssConfiguration、配置示例，新增OssConfigurationTest并同步功能说明；针对配置和存储适配的5项测试通过，不访问真实OSS。当前未执行迁移、重启或云端上传，也未提交/推送。
+
+## 2026-10-29：图片生命周期完善与后端各模块职责整理
+
+- 用户确认图片方案并要求各模块整理。本轮在feat/review-images保留既有成果，service只保留业务服务；规则、ID解析、图片处理、云SDK、邮件、认证转换与调度分别进入模块内policy、support、image、storage、mail、authentication、job，控制器与配置归位。AGENTS和架构文档固定规则，新增结构边界测试。
+- V6新增UPLOADING，取消先提交删除意图，再立即在事务外删OSS；完成204、待重试202、已绑定409。失败上传保留保护凭据覆盖普通晚到写入；极端冻结后的对象核对仍待后续，不承诺跨系统原子性。
+- 点评接有序photoIds，按ID升序锁媒体、按请求顺序关联，MANDATORY加入点评与统计事务；任一失效/越权全部回滚。先检查UUID和有序内容再绑定，空图保持旧摘要兼容。正式照片GET核验点评、父店、关联与BOUND后读私有OSS，不缓存。
+- 前端本地压缩预览，独立文件API与照片草稿函数负责上传/重试和取消；移除后晚到成功清理、不回填，账号变化使用原凭证；失败保留文件ID和UUID，成功后只释放本地URL。列表、历史、照片墙和统计展示仍待后续。
+- 最终独立目录完整mvn verify开启review/restaurant/auth/redis，共324项实际执行，0失败/错误/跳过并生成JAR；前端167项、ESLint、类型及构建通过。覆盖V5到V6有数据升级、绑定回滚、有序重放、绑定/取消竞争、云删除时无数据库事务及模块结构。初轮旧迁移数量与旧photoIds拒绝断言已修正。
+- Edge在1440/390/320宽、640高验证上传中移除后的晚到清理、双图顺序、失败同号重试、成功后不误删；云端及发布使用测试响应，未写业务库。日志与截图在仓库外oss-refactor产物中。
+- V6只在隔离库执行，开发业务库未升级，现有服务未重启；真实Bucket/RAM配置和云端验收待提供。未提交、推送或操作生产。本轮文件用途索引见[架构文档](architecture/modular-monolith.md)。
+
+## 2026-10-29：OSS图片第一步——上传、取消与到期清理
+
+- 用户确认选图压缩后本地预览并上传OSS，移除/取消清理临时图片，提交时有序绑定，发布后校验点评再读取；不新增临时预览接口。按仓库逐步审核规则，本轮先交付文件基础，绑定、正式读取与前端启用下一步实施，B/C读取预测保留。
+- 从当前feat/reviews创建feat/review-images，保留既有未提交成果。file模块新增上传与本人取消接口，服务端实际JPEG解码、尺寸/大小限制、重编码去附加内容、归属校验、私有ACL、V4签名与有界OSS超时。凭证只通过SDK环境变量读取，默认关闭OSS不影响文本发布。
+- 复用V4 media_files：上传前短事务登记待清理凭据、事务外写OSS、成功后激活临时状态；取消/过期清理采用有界批次和单行锁，OSS成功删除后移除登记，失败保留重试。保护窗口与极端进程冻结边界记录于结构文档，不承诺跨系统原子性。
+- API、功能、范围/后端计划、结构及本地配置示例同步；无新迁移、无前端代码改动、未启用云端配置，未提交或推送。开发Bucket与实际云端联调仍待配置。
+- 本轮新增15项测试（图片策略5、云适配3、真实MySQL/JWT接口7），完整开启review/restaurant/auth/redis后共316项实际执行，0失败/错误/跳过。首次verify在重打包阶段因运行中的开发JAR被Windows锁定而失败；保留测试结果，用临时POM仅调整输出目录并跳过重复测试，独立verify成功生成可执行JAR，未重启现有前后端。
+- 日志及构建产物位于仓库外oss-upload-verify.log、oss-upload-package.log及oss-upload-build；随机测试库已清理，临时MySQL实例已关闭。文档本地链接及git diff --check通过，前端未改故不重复运行前端测试。
+
+## 2026-10-29：修复点评提交反馈不可见
+
+- 接续会话01a18704-60ff-7c22-bb24-ea2ddb337e28最后的“点击提交点评没有反应”反馈。浏览器确认有效正文能触发POST，但校验和网络错误原先位于滚动区域内；短屏下原生fieldset还会撑出操作区，造成反馈不可见。
+- 表单改为独立滚动容器包裹禁用字段组，错误与加载/发布状态放在提交按钮旁；未选店和正文长度错误分别说明。发布中取消按钮同步禁用，保留失败草稿及原请求编号。
+- 补充实际按钮点击的组件回归；Edge在1440、390、320宽及640高验证空正文不发请求、提示可见、503失败反馈、同编号重试和成功回执。POST使用测试响应，没有向业务库写点评。前后端现有开发服务保留，前端由Vite热更新。
+- 本轮仅调整ReviewComposer.vue、review.spec.ts、features.md及本日志；读取、图片和评分展示仍待后续，未提交或推送。
+- 最终npm run check通过：162项前端测试、ESLint、TypeScript及生产构建通过；git diff --check通过。后端代码未改，未重跑后端测试。
+
+接续[development2.md](history/development-02.md)。记录阶段性变更与验证，历史时点的描述不代替当前功能或需求。
+
+## 2026-10-29：整理评价文档职责与过期规则
+
+- 用户确认按冗余检查结果整理文档。需求正文统一账号署名、同人归组、每人最新代表计分、人数/条数与删除回退；修正匿名昵称、全部点评计分、评价恢复、旧R1–R7步骤和已过时的结构进度。贡献榜范围保留，分组方式仍待审核。
+- features.md改为可用功能、使用方法、前端预览与尚未接通能力，不再承载迁移/事务设计和讨论经过。reviews-development.md改为完整范围与进度索引，后端实现细节由review-backend.md维护；review-schema.md明确已执行V4和拟议V5边界，移除重复事务/身份方案，保留字段、约束和媒体生命周期说明。
+- 原站访问/源码依据/旧规划归档至archive/reviews-development-2026-10-29.md；需求原站差异与餐厅阶段历史归档至archive/requirements-history-2026-10-29.md，重新解析相对链接。归档保存旧内容且明确非现行规则，历史验证记录不改写成当前验收。
+- README更新文档入口与职责，development2.md保留历史并链接本日志。图片、回复、删除、榜单、全站联动及地图/导入导出/离线/PWA待办保留；不新增或取消产品范围，不实现后端、不修改迁移或此前前端成果，不提交或推送。
+- 文档本地链接及章节锚点、JSON示例和git diff --check检查通过；业务代码未变，不重复运行前后端测试。清理前文档备份保存在仓库外D:/eat/.codex-backups/docs-cleanup-20261029/。
+
+## 2026-10-29：收拢文档目录与入口
+
+- 用户反馈文件结构混乱，本轮限定整理docs。根层保留需求、功能、已实现接口和当前开发记录；新增README作为唯一文档导航。
+- 旧日志与原站/需求归档统一进入history，部署说明进入operations，旧系统迁移计划进入plans；评价范围清单改名review-roadmap.md，与review-backend.md的实施方案区分。
+- 所有文件迁移前核对目标在工作区内，保留完整内容并重算相对链接。README简化入口，AGENTS.md更新固定当前日志与轮转到history的规则，避免再次出现多个根层编号日志。
+- 变更仅涉及文档与文档维护规则；此前前端成果保留。链接/章节锚点、JSON、移动内容完整性与Git空白检查通过，不重复运行业务测试，未提交或推送。整理前副本在仓库外docs-layout-20261029。
+
+## 2026-10-29：收窄最基础的文本发布计划
+
+- 用户要求先规划最基础的评价发布。在现有review-backend.md中细分A基础发布、B阅读/页面接入、C历史/预测；当前仅计划A步一个POST，不新增文档或接口实现。
+- A步包括身份/参数校验、保留历史的文本入库、UUID幂等、每人最新代表的事务计分及隔离数据库验证；V5人数列/索引属于必要前置。明确仅插入记录不够，但不把分组分页、历史、OSS、回复和删除提前打包进此次交付。
+- review-roadmap.md同步顺序，其他产品规则和待办保持。文档JSON与链接检查、git diff --check通过；未执行迁移、测试、提交或推送。
+
+## 2026-10-29：V5迁移与A步最简文本发布完成
+
+- 用户授权数据库迁移完成后直接继续最简发布开发。本轮在保留feat/reviews及全部未提交前端/文档成果的基础上，新增V5与纯文本POST，不扩大到B/C读取、历史、预测或前端正式接入；不提交、推送、合并或操作生产。
+- V5新增participant_count、作者/时间/ID复合索引，按每账号最新代表重建统计并补缺行，保留历史点评和已删店状态。独立MySQL8.4结构测试验证后，再升级仅限回环ginkgo_food_map开发库；本地实际MySQL8.0.34升级成功、再次迁移0项、26行统计且人数/条数均0。其他业务表数据指纹一致，迁移前统计备份及执行日志在仓库外review-v5-tools；V1–V4与HEAD逐字节一致。
+- 实现POST /api/restaurants/{restaurantId}/reviews：作者来自安全上下文，规范UUID、Unicode首尾空白/5–500码点、四维0–10半分和JSON布尔推荐校验；拒绝额外作者、图片、总分/状态字段。SHA256规范化内容摘要与author+UUID唯一键保证同次重试返回原ID，相同编号换内容409，不用内容唯一约束阻止下一次用餐。
+- restaurant公开协作服务以MANDATORY加入发布事务，锁父餐厅后判断未删除，停业允许。review仅访问自身Mapper，差量替换本人旧分并更新人数/条数/推荐，全部提交或回滚。当前发布按需创建统计行，兼容旧餐厅服务新建店；主动创建统计及目录读取留待B步。
+- 发布使用最多3次独立READ_COMMITTED事务，每次事务超时10秒，锁/查询超时或跨店唯一键竞争先完整回滚再重试，耗尽503。时钟回拨时新记录时间不早于旧代表，ID稳定定序。单条总分沿数据库HALF_UP两位，不用double做权威计算。
+- 新增规范化规则及真实JWT/MySQL接口测试；V5结构测试补有历史/同时间/缺行/已删父店升级样例，原餐厅结构测试更新最新版本/迁移数量。初轮发现测试误用enabled字段及MANDATORY代理外的spy设置，已改为真实status字段和代理目标设置；完整回归的旧迁移数量断言同步至5。
+- 最终mvn verify同时开启review/restaurant/auth/redis集成：301项全部实际执行，0失败/错误/跳过，JAR打包成功。其中review结构39项、规则14项、接口11项；验证幂等/冲突、身份、边界、同人更新、事务失败、并发重放/更新/跨店编号竞争、重试耗尽、时钟回拨和删店互斥。没有将前端既有153项测试冒充本轮新执行结果。
+- 本地8080由旧仓库外V4 JAR切换为本轮构建的JAR，保留local Profile、本机Redis与Vite。公开状态/餐厅GET均200，匿名发布401；没有向本地业务库发布测试评价或发送邮件。正向发布验证只在隔离随机库执行，测试库清理后关闭3315临时MySQL；3306/6379/8080/5173开发服务保留。
+- api.md第14节记录已实现协议；结构、功能、需求、范围/实施计划和文档索引同步A完成及B/C待办。发布结果只含ID和重放标记，不返回不存在的GET地址；餐厅GET仍为空评分，前端正式写评仍显示服务未开放。OSS、回复、删除及删除后永久防重仍待后续，不把POST阶段记为页面闭环完成。
+- 验证日志在仓库外review-publish-verify.log，初始结构验证在review-v5-schema-test.log。文档链接/锚点/JSON、源码/新文件空白及git diff --check通过；无私密配置、凭据或构建产物纳入待提交文件。交付说明逐项列出本轮16个后端文件与文档用途。
+
+## 2026-10-29：接通前端文本发布并重启联调服务
+
+- 用户要求修改前端并重启前后端供联调。新增review/api/reviewApi.ts作为真实POST适配，固定提交时Bearer，仅发送UUID、四维、推荐和正文，拒绝附图；模块公开入口与main.ts注入真实传输，预览页仍在独立子树覆盖，不混入真实数据。
+- ReviewComposer成功后保留服务端ID/重放回执，用户确认后才关闭，避免父详情刷新抹掉确认信息。同草稿失败重试沿用UUID，改动内容换号；失败保留输入，提交期间冻结表单及关闭入口，账号切换忽略旧异步结果；会话失效锁住正文并提供只读复制区。
+- 图片选择禁用，移除旧的“点评条数当计分人数”的综合分预测；本条总分/杯型仍显示。读取、回复、删除分别明确尚未开放，不发送不存在的GET，不将发布内容回填为假列表，也不改餐厅空评分。
+- 新增HTTP契约测试及组件回执/冻结/能力/登录失效测试，最终npm run check通过：161项、ESLint、TypeScript和生产构建。后端源码未变，沿用此前301项verify结果，不重复宣称新执行后端测试。
+- Edge在1440/390/320px验证真实餐厅GET代理、POST形状、503后同UUID重试、200重放回执与关闭；正向POST使用浏览器路由注入测试响应，不写本地业务库，不能称真实浏览器正向持久化验收。结果/截图在仓库外ginkgo-browser-check/artifacts/review-live-contract及review-live-contract-check.cjs。
+- 已核对进程命令行后重启本地前后端，8080加载已通过verify的V5发布JAR，5173固定端口Vite；本机MySQL/Redis保留，不用Docker。重启后真实状态/目录与匿名POST401通过代理核对，供用户使用真实账号正向联调。
+- features、api、review-roadmap和review-backend同步已接发布/未接读取的边界。仅新增/修改7个本轮前端文件，不修改后端协议或数据库；未提交、推送或部署。

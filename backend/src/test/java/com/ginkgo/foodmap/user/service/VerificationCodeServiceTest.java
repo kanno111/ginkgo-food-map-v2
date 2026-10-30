@@ -49,8 +49,7 @@ class VerificationCodeServiceTest {
                 redisTemplate,
                 properties,
                 new VerificationCodeRedisScripts(mockScript(), mockScript(), mockScript(), mockScript()),
-                mailSender,
-                mailProperties()
+                new com.ginkgo.foodmap.user.mail.VerificationMailSender(mailSender, properties, mailProperties())
         );
     }
 

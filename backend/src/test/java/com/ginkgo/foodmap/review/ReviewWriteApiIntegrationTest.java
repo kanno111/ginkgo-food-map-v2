@@ -1,0 +1,223 @@
+package com.ginkgo.foodmap.review;
+
+import com.ginkgo.foodmap.restaurant.service.RestaurantReviewApplicationService;
+import com.ginkgo.foodmap.security.TestJwtKeys;
+import com.ginkgo.foodmap.security.config.AuthenticationProperties;
+import com.ginkgo.foodmap.security.service.LoginSessionService;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.*;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.ObjectMapper;
+import java.sql.*;
+import java.time.Instant;
+import java.math.BigDecimal;
+import java.util.*;
+import java.util.concurrent.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/** 真实MySQL/Flyway/RS256测试；只替换Redis会话依赖，不绕过数据库账号状态。 */
+@ActiveProfiles("test")
+@SpringBootTest(properties={"spring.flyway.enabled=true","spring.sql.init.mode=never",
+    "spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver","spring.datasource.hikari.minimum-idle=0"})
+@AutoConfigureMockMvc(print=org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint.NONE)
+@Import(TestJwtKeys.class)
+@EnabledIfSystemProperty(named="review.integration",matches="true")
+class ReviewWriteApiIntegrationTest {
+    private static String database;
+    private static boolean created;
+    @Autowired MockMvc mvc;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper json;
+    @Autowired JwtEncoder encoder;
+    @Autowired AuthenticationProperties authentication;
+    @MockitoBean LoginSessionService sessions;
+    @MockitoSpyBean RestaurantReviewApplicationService statistics;
+    private String owner,other;
+    private RestaurantReviewApplicationService statisticsTarget;
+
+    /** 测试仅访问显式回环实例，创建成功才登记可清理随机库。 */
+    @DynamicPropertySource static void properties(DynamicPropertyRegistry registry) throws SQLException {
+        database="ginkgo_review_write_it_"+UUID.randomUUID().toString().replace("-", "");
+        try(var c=connect("");var s=c.createStatement()) {
+            s.executeUpdate("CREATE DATABASE `"+database+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");created=true;
+        }
+        registry.add("spring.datasource.url",()->url(database));
+        registry.add("spring.datasource.username",()->"root");
+        registry.add("spring.datasource.password",ReviewWriteApiIntegrationTest::password);
+    }
+    @BeforeEach void setup() {
+        statisticsTarget=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(statistics);
+        reset(sessions,statisticsTarget);
+        jdbc.update("DELETE FROM reviews");jdbc.update("DELETE FROM restaurant_review_statistics");
+        jdbc.update("DELETE FROM restaurants");jdbc.update("DELETE FROM user_roles");jdbc.update("DELETE FROM users");
+        for(long id:List.of(11L,22L)) {
+            jdbc.update("INSERT INTO users(id,username,email,password_hash,email_verified) VALUES(?,?,?,?,TRUE)",id,"reviewer_"+id,"reviewer"+id+"@example.test","test-only");
+            jdbc.update("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='ROLE_USER'",id);
+        }
+        jdbc.update("INSERT INTO restaurants(id,name,category_code,source_type,created_by) VALUES(1,'发布店','OTHER','LEGACY_IMPORT',11),(2,'另一店','OTHER','LEGACY_IMPORT',11)");
+        when(sessions.isActive(anyString(),anyLong(),anyLong())).thenReturn(true);
+        owner=token(11,false);other=token(22,false);
+    }
+    @AfterAll static void cleanup() throws SQLException {
+        if(!created)return;
+        if(!database.matches("ginkgo_review_write_it_[a-f0-9]{32}"))throw new IllegalStateException("Unexpected database");
+        try(var c=connect("");var s=c.createStatement()){s.executeUpdate("DROP DATABASE `"+database+"`");}
+    }
+    private Map<String,Object> input(double score,boolean recommended,String uuid) {
+        return new LinkedHashMap<>(Map.of("clientRequestId",uuid,"scores",Map.of("taste",score,"value",score,"service",score,"ambience",score),"recommended",recommended,"body","这是一条真实测试正文"));
+    }
+    private org.springframework.test.web.servlet.ResultActions publish(String token,long restaurant,Map<String,Object> data) throws Exception {
+        return mvc.perform(post("/api/restaurants/"+restaurant+"/reviews").header("Authorization","Bearer "+token)
+            .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(data)));
+    }
+    private long count(String table){return jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Long.class);}
+    private void assertStats(long total,long people,long recommended,String sum) {
+        var row=jdbc.queryForMap("SELECT * FROM restaurant_review_statistics WHERE restaurant_id=1");
+        assertThat(((Number)row.get("review_count")).longValue()).isEqualTo(total);
+        assertThat(((Number)row.get("participant_count")).longValue()).isEqualTo(people);
+        assertThat(((Number)row.get("recommend_count")).longValue()).isEqualTo(recommended);
+        for(String column:List.of("taste_sum","value_sum","service_sum","ambience_sum","overall_score_sum"))
+            assertThat((BigDecimal)row.get(column)).isEqualByComparingTo(sum);
+    }
+    @Test void preservesHistoryAndCountsPeopleNotReviews() throws Exception {
+        publish(owner,1,input(8,true,UUID.randomUUID().toString())).andExpect(status().isCreated())
+            .andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("$.data.replayed").value(false));
+        publish(owner,1,input(6,false,UUID.randomUUID().toString())).andExpect(status().isCreated());
+        publish(other,1,input(9,true,UUID.randomUUID().toString())).andExpect(status().isCreated());
+        assertThat(count("reviews")).isEqualTo(3);assertStats(3,2,1,"15");
+    }
+    @Test void canonicalReplayAndContentConflict() throws Exception {
+        String uuid=UUID.randomUUID().toString();var data=input(7,true,uuid);data.put("body","　测试正文五个字\u00a0");
+        var response=publish(owner,1,data).andExpect(status().isCreated()).andReturn();
+        String id=json.readTree(response.getResponse().getContentAsString()).get("data").get("reviewId").asText();
+        data.put("body","测试正文五个字");
+        publish(owner,1,data).andExpect(status().isOk()).andExpect(jsonPath("$.data.reviewId").value(id)).andExpect(jsonPath("$.data.replayed").value(true));
+        data.put("body","这次是不同的正文内容");publish(owner,1,data).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("REVIEW_REQUEST_CONFLICT"));
+        publish(owner,2,input(7,true,uuid)).andExpect(status().isConflict());
+        publish(other,1,input(7,true,uuid)).andExpect(status().isCreated());assertStats(2,2,2,"14");
+    }
+    @Test void rejectsAnonymousExpiredDisabledAndInvalidSession() throws Exception {
+        mvc.perform(post("/api/restaurants/1/reviews").contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(input(7,true,UUID.randomUUID().toString())))).andExpect(status().isUnauthorized());
+        when(sessions.isActive(anyString(),anyLong(),anyLong())).thenReturn(false);
+        publish(owner,1,input(7,true,UUID.randomUUID().toString())).andExpect(status().isUnauthorized());
+        when(sessions.isActive(anyString(),anyLong(),anyLong())).thenReturn(true);
+        publish(token(11,true),1,input(7,true,UUID.randomUUID().toString())).andExpect(status().isUnauthorized());
+        jdbc.update("UPDATE users SET status='DISABLED' WHERE id=11");
+        publish(owner,1,input(7,true,UUID.randomUUID().toString())).andExpect(status().isUnauthorized());assertThat(count("reviews")).isZero();
+    }
+    @Test void validatesFieldsScoresAndUnicode() throws Exception {
+        for(double value:List.of(-0.5,10.5,7.1,7.4))publish(owner,1,input(value,true,UUID.randomUUID().toString())).andExpect(status().isBadRequest());
+        for(String field:List.of("authorUserId","photos","createdAt","overallScore")) {
+            var data=input(7,true,UUID.randomUUID().toString());data.put(field,List.of());publish(owner,1,data).andExpect(status().isBadRequest());
+        }
+        for(String body:List.of("1234","🥟".repeat(501),"   ")) {
+            var data=input(7,true,UUID.randomUUID().toString());data.put("body",body);publish(owner,1,data).andExpect(status().isBadRequest());
+        }
+        for(String field:List.of("body","recommended","scores","clientRequestId")) {
+            var data=input(7,true,UUID.randomUUID().toString());data.remove(field);publish(owner,1,data).andExpect(status().isBadRequest());
+        }
+        var data=input(0,false,UUID.randomUUID().toString());data.put("body","🥟".repeat(500));publish(owner,1,data).andExpect(status().isCreated());
+        data=input(10,true,UUID.randomUUID().toString());data.put("recommended","true");publish(owner,1,data).andExpect(status().isBadRequest());assertStats(1,1,0,"0");
+    }
+    @Test void allowsClosedButRejectsDeletedMissingAndMalformedRestaurant() throws Exception {
+        jdbc.update("UPDATE restaurants SET business_status='CLOSED' WHERE id=1");
+        var data=input(7,true,UUID.randomUUID().toString());publish(owner,1,data).andExpect(status().isCreated());
+        publish(owner,999,data).andExpect(status().isNotFound());
+        mvc.perform(post("/api/restaurants/01/reviews").header("Authorization","Bearer "+owner).contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(data))).andExpect(status().isBadRequest());
+        jdbc.update("UPDATE restaurants SET deleted_at=CURRENT_TIMESTAMP(6),delete_reason_code='SYSTEM' WHERE id=1");
+        publish(owner,1,input(7,true,UUID.randomUUID().toString())).andExpect(status().isNotFound());
+    }
+    @Test void rollsBackStatisticsAndReviewAndAllowsRetry() throws Exception {
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("injected failure")).when(statisticsTarget).applyDelta(anyLong(),any());
+        var data=input(7,true,UUID.randomUUID().toString());publish(owner,1,data).andExpect(status().isConflict());
+        assertThat(count("reviews")).isZero();assertThat(count("restaurant_review_statistics")).isZero();
+        reset(statisticsTarget);publish(owner,1,data).andExpect(status().isCreated());assertStats(1,1,1,"7");
+    }
+    @Test void concurrentReplayAndAuthorUpdatesRemainConsistent() throws Exception {
+        try(var pool=Executors.newFixedThreadPool(6)) {
+            var data=input(8,true,UUID.randomUUID().toString());var futures=new ArrayList<Future<Integer>>();
+            for(int i=0;i<6;i++)futures.add(pool.submit(()->publish(owner,1,data).andReturn().getResponse().getStatus()));
+            var statuses=new ArrayList<Integer>();for(var f:futures)statuses.add(f.get(20,TimeUnit.SECONDS));
+            assertThat(statuses).containsOnly(200,201);assertThat(Collections.frequency(statuses,201)).isEqualTo(1);assertStats(1,1,1,"8");futures.clear();
+            for(int i=0;i<6;i++){int n=i;futures.add(pool.submit(()->publish(owner,1,input(n,n%2==0,UUID.randomUUID().toString())).andReturn().getResponse().getStatus()));}
+            for(var f:futures)assertThat(f.get(20,TimeUnit.SECONDS)).isEqualTo(201);
+            var latest=jdbc.queryForMap("SELECT overall_score,is_recommended FROM reviews WHERE restaurant_id=1 ORDER BY created_at DESC,id DESC LIMIT 1");
+            long recommended=Boolean.TRUE.equals(latest.get("is_recommended"))?1:0;
+            assertStats(7,1,recommended,latest.get("overall_score").toString());
+        }
+    }
+    @Test void concurrentCrossRestaurantUuidHasOneWinner() throws Exception {
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            var data=input(7,true,UUID.randomUUID().toString());
+            var a=pool.submit(()->publish(owner,1,data).andReturn().getResponse().getStatus());
+            var b=pool.submit(()->publish(owner,2,data).andReturn().getResponse().getStatus());
+            assertThat(List.of(a.get(20,TimeUnit.SECONDS),b.get(20,TimeUnit.SECONDS))).containsExactlyInAnyOrder(201,409);assertThat(count("reviews")).isEqualTo(1);
+        }
+    }
+    @Test void publishAndDeleteShareParentLock() throws Exception {
+        var reached=new CountDownLatch(1);var release=new CountDownLatch(1);
+        doAnswer(i->{reached.countDown();if(!release.await(10,TimeUnit.SECONDS))throw new IllegalStateException("test timeout");return i.callRealMethod();}).when(statisticsTarget).applyDelta(anyLong(),any());
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            var a=pool.submit(()->publish(owner,1,input(7,true,UUID.randomUUID().toString())).andReturn().getResponse().getStatus());
+            assertThat(reached.await(10,TimeUnit.SECONDS)).isTrue();
+            var b=pool.submit(()->mvc.perform(delete("/api/restaurants/1").header("Authorization","Bearer "+owner)).andReturn().getResponse().getStatus());
+            try{assertThat(b.isDone()).isFalse();}finally{release.countDown();}
+            assertThat(a.get(20,TimeUnit.SECONDS)).isEqualTo(201);assertThat(b.get(20,TimeUnit.SECONDS)).isEqualTo(200);
+            mvc.perform(get("/api/restaurants/1")).andExpect(status().isNotFound());
+            publish(owner,1,input(8,true,UUID.randomUUID().toString())).andExpect(status().isNotFound());assertStats(1,1,1,"7");
+        }finally{release.countDown();}
+    }
+    /** 有界重试必须退出旧事务，耗尽后返回可重试503而不是重计或无限等待。 */
+    @Test void retriesWholeTransactionAndStopsAfterThreeFailures() throws Exception {
+        doThrow(new org.springframework.dao.CannotAcquireLockException("test-only"))
+            .doCallRealMethod().when(statisticsTarget).applyDelta(anyLong(),any());
+        publish(owner,1,input(7,true,UUID.randomUUID().toString())).andExpect(status().isCreated());
+        assertThat(count("reviews")).isEqualTo(1);assertStats(1,1,1,"7");
+        verify(statisticsTarget,times(2)).applyDelta(anyLong(),any());
+        reset(statisticsTarget);
+        doThrow(new org.springframework.dao.CannotAcquireLockException("test-only"))
+            .when(statisticsTarget).applyDelta(anyLong(),any());
+        publish(owner,1,input(8,true,UUID.randomUUID().toString())).andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("REVIEW_TEMPORARILY_UNAVAILABLE"));
+        verify(statisticsTarget,times(3)).applyDelta(anyLong(),any());assertStats(1,1,1,"7");
+        assertThat(count("reviews")).isEqualTo(1);
+    }
+    @Test void futurePreviousTimestampStillAllowsNewRepresentative() throws Exception {
+        publish(owner,1,input(8,true,UUID.randomUUID().toString())).andExpect(status().isCreated());
+        jdbc.update("UPDATE reviews SET created_at=CURRENT_TIMESTAMP(6)+INTERVAL 1 HOUR");
+        publish(owner,1,input(6,false,UUID.randomUUID().toString())).andExpect(status().isCreated());
+        assertStats(2,1,0,"6");
+        assertThat(jdbc.queryForObject("SELECT overall_score FROM reviews ORDER BY created_at DESC,id DESC LIMIT 1",BigDecimal.class)).isEqualByComparingTo("6");
+    }
+    private String token(long user,boolean expired) {
+        var now=Instant.now();var p=authentication.getJwt();
+        var claims=JwtClaimsSet.builder().issuer(p.getIssuer()).audience(List.of(p.getAudience())).subject(Long.toString(user))
+            .issuedAt(now.minusSeconds(120)).expiresAt(now.plusSeconds(expired?-60:600)).id(UUID.randomUUID().toString()).claim("credential_version",0).build();
+        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).build(),claims)).getTokenValue();
+    }
+    private static String password(){return Objects.requireNonNull(System.getenv("REVIEW_TEST_DB_PASSWORD"),"Set isolated test password");}
+    private static String url(String name) {
+        var server=System.getenv().getOrDefault("REVIEW_TEST_DB_SERVER","jdbc:mysql://127.0.0.1:3306/");
+        if(!server.matches("jdbc:mysql://(127\\.0\\.0\\.1|localhost):[0-9]{1,5}/"))throw new IllegalArgumentException("Loopback only");
+        return server+name+"?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true";
+    }
+    private static Connection connect(String db)throws SQLException{return DriverManager.getConnection(url(db),"root",password());}
+}

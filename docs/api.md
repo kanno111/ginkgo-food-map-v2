@@ -1,6 +1,48 @@
 # Ginkgo 美食地图 V2 接口文档
 
-最后核对日期：2026-10-28。
+最后核对日期：2026-10-30。
+
+## 图片上传、取消、点评绑定与正式访问
+
+文件接口、写评表单和点评有序绑定已实现。服务需配置并开启私有、未启用版本控制的OSS Bucket；默认关闭时上传返回503，不影响文本点评。写点评期间继续本地预览，不新增临时预览接口。真实OSS上传/读取/删除及隔离MySQL/JWT接口已验收；开发业务库已升级V7，前后端已重启，页面联调入口可用。
+
+| 方法与路径 | 权限 | 请求 | 成功响应 |
+| --- | --- | --- | --- |
+| POST `/api/files/images` | Bearer登录 | multipart/form-data，单张`file` | 201，统一响应的data见下例 |
+| DELETE `/api/files/images/{fileId}` | Bearer登录、本人未绑定文件 | 正数文件ID字符串，无请求体 | 已删除/已不存在204无响应体；意图已提交但删除尚未确认202，统一响应`data:null` |
+| GET `/api/reviews/{reviewId}/photos/{position}` | 公开，但校验点评、父店与图片关联 | 正数点评ID、位置0至4 | 200，image/jpeg二进制，不缓存；不存在或不可见404 |
+
+上传data示例（仍由success/code/message/data/timestamp包裹）：
+
+```json
+{
+  "fileId": "123",
+  "byteSize": 85600,
+  "width": 1200,
+  "height": 800,
+  "expiresAt": "2026-10-30T13:00:00Z"
+}
+```
+
+只接受浏览器压缩后的真实JPEG，单张1–307200字节、宽高1–1200px；服务端解码并重编码，重新校验大小并计算SHA256，不相信文件名和Content-Type。原PNG/WebP由浏览器转换JPEG后上传。multipart请求总大小上限320KiB。不接收自定义Bucket、Object Key或上传者；响应不提供OSS地址。
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 400 | FILE_INVALID_IMAGE | 缺少file、伪图片、非JPEG、损坏、尺寸或业务大小超限 |
+| 401 | 现有AUTH错误码 | 未登录或会话无效 |
+| 404 | FILE_NOT_FOUND | 取消时ID非法或文件属于他人；正式图片不存在或关联无效 |
+| 409 | FILE_ALREADY_BOUND | 本人的图片已用于点评，不能从临时取消接口删除 |
+| 409 | FILE_NOT_BINDABLE | 发布时图片不属于本人、过期、尚未完成上传或已被其他请求绑定 |
+| 413 | FILE_TOO_LARGE | multipart解析阶段超过单文件/请求大小上限 |
+| 503 | FILE_STORAGE_UNAVAILABLE | 未配置OSS、云存储失败或上传完成状态无法确认 |
+
+上传前先提交UPLOADING记录，OSS成功后才激活TEMPORARY并返回ID，默认24小时有效。失败/响应丢失可能留下临时文件，由到期任务回收；上传重试不保证返回同一文件ID。上传失败进入PENDING_DELETE并立即尝试删除，一小时保护期内保留凭据，到期再次删除，覆盖普通晚到写入；超长进程冻结后的对象核对仍为后续边界。
+
+取消在短事务内验证归属、提交待删除状态，随后立即在事务外调用OSS。成功后条件删除登记，失败保留重试。默认每60秒最多处理50条到期记录，BOUND不进入清理；云调用期间不持有数据库锁。204表示完成，202表示意图已接收但删除尚未确认。接口成功响应带Cache-Control:no-store。
+
+点评POST新增可选`photoIds`数组，缺省/空数组保持原文本协议，最多5个不重复的本人有效文件ID，按数组顺序保存。文件ID升序加锁，展示位置按请求顺序；点评、关联、文件BOUND和统计同事务提交，失败整体回滚。附图摘要为photo-review-v2，空图保持text-review-v1字节兼容；重放先匹配原请求和有序关联，不重新要求图片处于临时态。
+
+正式照片GET先核验点评、父店及关联再读私有OSS；隐藏内容404、存储故障503，不缓存，不公开任意文件ID访问接口。已传输给浏览器的字节无法撤回。点评主列表及前端分页已接入，见第15节；历史见第16节，独立照片墙仍待实现。
 
 本文面向前后端联调和接口调用者，仅描述当前已实现的接口。参数规则和频率限制中的数值为仓库默认配置，部署环境可以覆盖允许域名、有效期和限流策略。
 
@@ -111,6 +153,8 @@ DTO 参数校验失败返回 HTTP 400，`data` 为字段错误数组，按字段
 | PUT | `/api/restaurants/{id}` | Bearer，创建者或管理员 | 200 | 完整替换可编辑资料与标签 |
 | DELETE | `/api/restaurants/{id}` | Bearer，创建者或管理员 | 200 | 软删除，保留历史标签，无需版本 |
 | POST | `/api/restaurants/{id}/restore` | Bearer，管理员 | 200 | 恢复已删除餐厅，无需版本 |
+| POST | `/api/restaurants/{restaurantId}/reviews` | Bearer | 201 / 200重放 | 发布纯文本点评并更新每人最新代表统计 |
+| GET | `/api/restaurants/{restaurantId}/reviews` | 公开 | 200 | 按作者分页读取最新点评、历史条数和有序照片引用 |
 | GET | `/actuator/health` | 公开 | 200 / 503 | 基础设施健康检查 |
 
 ## 3. 邮箱验证码
@@ -421,7 +465,7 @@ Accept: application/json
 
 服务器站点的 `GET /version.txt` 无需认证，无参数，成功返回 HTTP 200、纯文本40位 Git 提交号及换行，并设置 `Cache-Control: no-store`。由发布流水线生成并交给 Nginx 托管，不使用业务 JSON 包装，没有业务副作用。首次发布前站点返回503；文件缺失且站点已有版本时返回404。此资源不由后端或本地 Vite 提供，不能代替后端健康检查。
 
-宿主机部署使用 [deploy/nginx.conf](../deploy/nginx.conf)，没有单独的 `/nginx-health` 探针；上节的该探针仅适用于前端 Docker 镜像。完整部署与排查说明见[自动部署文档](deployment.md)。
+宿主机部署使用 [deploy/nginx.conf](../deploy/nginx.conf)，没有单独的 `/nginx-health` 探针；上节的该探针仅适用于前端 Docker 镜像。完整部署与排查说明见[自动部署文档](operations/deployment.md)。
 
 ## 9. 错误码索引
 
@@ -737,7 +781,7 @@ ID沿用11.3的规范正Long字符串。餐厅接口不再定义或返回 `RESTA
 
 ## 13. 尚未实现与维护要求
 
-尚未提供刷新令牌、列出设备、退出其他会话、评价、图片及地图等业务接口。餐厅只读、创建、编辑、软删除、管理快照和管理员恢复已在当前工作区实现，尚未部署；分类、列表、详情、新增、编辑和删除已接入前端，管理员回收站列表与页面尚未实现；密码重置及基础认证验收已由用户确认通过。不要将其他计划中的路径作为现有API调用。
+已实现文本/带图点评发布、图片上传/取消/正式访问和第15节的点评分组读取；历史读取见第16节；尚未提供本人计分上下文、回复、删评、照片墙、地图、刷新令牌或设备管理接口。餐厅只读及维护接口已实现，部署状态以实际发布为准；分类、列表、详情、新增、编辑和删除已接入前端，点评读取页面已接入，管理员回收站页面尚未实现；密码重置及基础认证验收已由用户确认通过。不要将其他计划中的路径作为现有API调用。
 
 前端的 `/restaurants/:id`、`/restaurants/new`、`/restaurants/:id/edit`、`/scoring-guide` 是客户端页面路由。餐厅前端已接入第11节分类、列表和独立详情；所有筛选、排序、计数和分页由服务端执行，tiers按重复查询参数发送。支持加载、防抖搜索、取消旧请求、失败重试、404及真实空态，不回退到预览快照。三个公开GET默认不携带旧Bearer，管理GET和所有写操作仍携带登录凭证。
 
@@ -754,5 +798,208 @@ ID沿用11.3的规范正Long字符串。餐厅接口不再定义或返回 `RESTA
 - [登录Controller](../backend/src/main/java/com/ginkgo/foodmap/security/controller/LoginController.java)、[登录Service](../backend/src/main/java/com/ginkgo/foodmap/security/service/LoginService.java)。
 - [注册Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/AuthController.java)、[验证码Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/AuthEmailCodeController.java)。
 - [密码重置Controller](../backend/src/main/java/com/ginkgo/foodmap/user/controller/PasswordResetController.java)、[密码重置Service](../backend/src/main/java/com/ginkgo/foodmap/user/service/PasswordResetService.java)。
-- [安全配置](../backend/src/main/java/com/ginkgo/foodmap/security/SecurityConfiguration.java)、[统一响应](../backend/src/main/java/com/ginkgo/foodmap/common/api/ApiResponse.java)。
-- [默认配置](../backend/src/main/resources/application.yml)、[功能说明](features.md)、[开发记录](development.md)。
+- [安全配置](../backend/src/main/java/com/ginkgo/foodmap/security/config/SecurityConfiguration.java)、[统一响应](../backend/src/main/java/com/ginkgo/foodmap/common/api/ApiResponse.java)。
+- [默认配置](../backend/src/main/resources/application.yml)、[功能说明](features.md)、[开发记录](history/development-01.md)。
+
+## 14. 最简文本点评发布
+
+`POST /api/restaurants/{restaurantId}/reviews`。必须携带有效Bearer；作者取当前会话，不由请求指定。餐厅ID为1至Long最大值的十进制正整数，不接受前导零。停业允许，已删除或不存在返回404。
+
+```json
+{
+  "clientRequestId": "d6fb79a2-6866-41ae-9c38-13d239668c21",
+  "scores": { "taste": 8, "value": 7.5, "service": 7, "ambience": 8 },
+  "recommended": true,
+  "body": "这次出餐很快，分量也比较足，下次还会来。"
+}
+```
+
+| 字段 | 规则 |
+| --- | --- |
+| clientRequestId | 必填规范UUID，同次重试沿用；大小写规范化。不同账号有独立作用域，同账号跨餐厅不能复用同一次编号 |
+| scores | 四维完整、十进制0–10、步进0.5；不将7.1等非法分数舍入后保存 |
+| recommended | 必填JSON布尔值，不接受字符串或数字 |
+| body | 必填纯文本，首尾Unicode空白规范化后5–500码点；正文不执行HTML |
+
+当前支持最多五个有序photoIds，图片协议见本文开头。不支持photos、authorUserId、createdAt、总分或计分状态等额外字段，提交返回400，不会丢弃照片后宣告成功。嵌套scores的额外字段也拒绝。
+
+首次成功HTTP 201；同账号、同UUID且规范化内容一致，HTTP 200返回原ID及replayed=true。此接口不返回尚未实现的GET地址，也不提供Location。成功响应禁止缓存：`Cache-Control: no-store`。
+
+```json
+{
+  "success": true,
+  "code": "OK",
+  "message": "请求成功",
+  "data": { "reviewId": "101", "restaurantId": "26", "replayed": false },
+  "timestamp": "2026-10-29T12:00:00Z"
+}
+```
+
+| HTTP | 错误码 | 含义 |
+| --- | --- | --- |
+| 400 | REVIEW_INVALID_INPUT | 餐厅ID、UUID、四维、推荐或正文不符合规则 |
+| 400 | COMMON_MALFORMED_REQUEST | 无法解析JSON、类型错误或不支持字段 |
+| 401 | AUTH_UNAUTHENTICATED | 缺失、过期或无效会话，或账号不可用；由安全过滤链统一返回 |
+| 404 | RESTAURANT_NOT_FOUND | 餐厅不存在或已删除，包括在原请求成功后被删店的重试 |
+| 409 | REVIEW_REQUEST_CONFLICT | 同账号同UUID已对应不同餐厅、正文、评分或推荐 |
+| 503 | REVIEW_TEMPORARILY_UNAVAILABLE | 并发锁、唯一键竞争或超时经最多3次完整事务尝试仍未成功；保留原内容/UUID重试 |
+| 503 | AUTH_SERVICE_UNAVAILABLE | 认证依赖临时故障，拒绝写入 |
+| 500 | COMMON_INTERNAL_SERVER_ERROR | 未预期存储故障，事务回滚；不返回SQL或内部详情 |
+
+关键副作用：每次真实发布保留旧点评并新增一条，review_count增加1；同店首次评价才增加participant_count，再次评价从累计值中减本人旧代表、加新代表。点评、代表统计及必要的统计行初始化同事务提交，失败一起回滚。单条总分由数据库生成并使用HALF_UP两位；新记录时间不早于旧代表，时钟回拨时仍由新ID稳定定序。
+
+同内容不同UUID属于不同用餐记录，不设内容唯一约束或每日业务配额。幂等由数据库author_user_id+client_request_id唯一键兜底；请求摘要含协议版本、餐厅、四维、推荐和规范化正文。无效UUID不会自动换号；内容改动才生成新的提交编号。
+
+当前已实现文本/带图发布、数据库计分、前端上传与回执，以及校验内容状态后的正式照片访问。点评主列表及页面分页见第15节；历史分页见第16节；预测、回复与删评尚未接通，餐厅GET仍不展示新统计。前端失败保留草稿与同次UUID，图片上传失败可重试/移除，发布中禁止取消，成功后关闭不会清理已绑定图片。本地开发库此前已升级V7；B1后端与Vite现已启动供本地联调，后续列表页面改动由Vite热更新。
+
+## 15. 点评按作者分组读取
+
+`GET /api/restaurants/{restaurantId}/reviews?page=1&pageSize=8`。公开，无需Bearer；建议匿名浏览不附带旧令牌，携带无效令牌仍会由安全过滤链拒绝。餐厅ID为1至Long最大值的规范十进制正整数，不接受前导零。停业允许读取，不存在或已删除返回404。
+
+| 参数 | 默认值 | 规则 |
+| --- | --- | --- |
+| page | 1 | 整数1–2147483647，超出最后一页返回空records并保留真实总数 |
+| pageSize | 8 | 整数1–50，按作者组计数 |
+
+HTTP 200，`Cache-Control: no-store`。例如某人先评8分、再评6分，另一人评9分，返回2组、3条；主卡仅含6分和9分，不把旧的8分内嵌。示例data如下，外层仍为success/code/message/data/timestamp：
+
+```json
+{
+  "records": [
+    {
+      "author": { "id": "22", "username": "同学乙" },
+      "currentReview": {
+        "id": "103", "scores": { "taste": 9, "value": 9, "service": 9, "ambience": 9 },
+        "overallScore": 9.00, "tier": "bucket", "recommended": true,
+        "body": "这家餐厅味道不错，下次还会来。", "createdAt": "2026-10-30T01:00:00Z",
+        "scoringStatus": "current",
+        "photos": [{ "id": "501", "position": 0, "url": "/api/reviews/103/photos/0" }]
+      },
+      "historyCount": 0, "nextHistoryCursor": null
+    },
+    {
+      "author": { "id": "11", "username": "同学甲" },
+      "currentReview": {
+        "id": "102", "scores": { "taste": 6, "value": 6, "service": 6, "ambience": 6 },
+        "overallScore": 6.00, "tier": "medium", "recommended": false,
+        "body": "这次体验一般，希望以后有所改进。", "createdAt": "2026-10-29T02:00:00Z",
+        "scoringStatus": "current", "photos": []
+      },
+      "historyCount": 1, "nextHistoryCursor": "MToxOjExOjE3OTMyMzkyMDA6MDoxMDI"
+    }
+  ],
+  "totalGroups": 2, "totalReviews": 3, "page": 1, "pageSize": 8, "totalPages": 1
+}
+```
+
+每位作者按(createdAt,id)倒序选出最新点评，主卡再按同样规则排序。totalGroups为独立账号数，totalReviews为该店保留的全部点评条数；查询直接从点评计算，兼容缺少餐厅统计行的旧记录。单条overallScore使用数据库已生成的四维均分，不等于餐厅聚合分；tier为bucket/super/large/medium/small。0分有效，不显示待评级。
+
+照片按position升序，最多五个，url为既有正式照片接口的相对地址；列表不访问OSS，不暴露对象键或凭证。作者只含公开ID/当前用户名，按账号ID归组；账号记录缺失时保留ID，名称显示“用户不可用”。不返回邮箱、账号状态、角色、幂等材料或删除权限。
+
+有历史时nextHistoryCursor定位当前代表，可作为首次历史请求的cursor；没有历史时historyCount为0且游标为空。历史读取见第16节。单次响应在同一个REPEATABLE_READ只读快照内完成父店可见性、计数、主卡、作者和照片查询，无写锁或写入副作用。跨请求有新评时分组会移动，页码分页不保证动态列表绝无重复/遗漏；前端已按每页8组接入，发布完成并关闭回执后回第一页刷新；读取错误支持原页重试，切店会取消旧请求并忽略晚到结果。公开GET不带旧Bearer，图片使用正式相对地址。餐厅汇总统计按用户要求暂缓，不从当前点评页推算全店评分。
+
+| HTTP | 错误码 | 场景 |
+| --- | --- | --- |
+| 400 | REVIEW_INVALID_QUERY | 非法餐厅ID、前导零或Long溢出 |
+| 400 | COMMON_VALIDATION_FAILED / COMMON_MALFORMED_REQUEST | 页码或每页数量非法，具体取决于约束或类型转换错误 |
+| 401 | AUTH_UNAUTHENTICATED | 主动携带了无效或过期Bearer；匿名请求可正常访问 |
+| 404 | RESTAURANT_NOT_FOUND | 餐厅不存在或已删除，不泄露其点评 |
+| 500 | COMMON_INTERNAL_SERVER_ERROR | 未预期读取故障，不返回SQL或内部详情 |
+
+## 16. 作者在单店的历史点评
+
+`GET /api/restaurants/{restaurantId}/reviews/authors/{authorId}/history`。公开，无需Bearer，HTTP 200及`Cache-Control: no-store`；两个路径ID均为无前导零的Long范围正整数。停业可读，餐厅不存在或已删除返回404。只读，无数据库或OSS写入副作用。
+
+| 参数 | 默认值 | 规则 |
+| --- | --- | --- |
+| pageSize | 5 | 整数1–20，额外查询1条判断hasMore |
+| cursor | 无 | 可省略，从当前最新点评之前开始；或原样传递列表nextHistoryCursor/上一段nextCursor，最长200字符 |
+
+响应外层仍为success/code/message/data/timestamp，data示例：
+
+```json
+{
+  "author": { "id": "11", "username": "同学甲" },
+  "currentReviewId": "102",
+  "records": [{
+    "id": "101", "scores": { "taste": 8, "value": 8, "service": 8, "ambience": 8 },
+    "overallScore": 8.00, "tier": "super", "recommended": true,
+    "body": "上一次用餐的历史记录，保留原有照片。", "createdAt": "2026-10-28T01:00:00Z",
+    "scoringStatus": "history",
+    "photos": [{ "id": "500", "position": 0, "url": "/api/reviews/101/photos/0" }]
+  }],
+  "hasMore": false,
+  "nextCursor": null
+}
+```
+
+历史按(createdAt,id)严格倒序，排除游标锚点，默认排除当前代表。照片最多五张、按position排序，复用正式照片接口；不返回邮箱、权限、OSS对象键或请求幂等材料。作者无任何点评时author/currentReviewId为空，records为空、hasMore=false、nextCursor为空。只有当前一条时作者和currentReviewId仍存在，历史为空。
+
+存在后续时hasMore=true，nextCursor为本段最后一条的游标；末段false/null。游标为版本化Base64URL参数，绑定餐厅、作者、时间及ID，并核对真实锚点；不是权限凭证，不允许拼接SQL。不要自行构造、修改或跨作者复用。
+
+父店、最新代表、锚点、历史和公开作者/照片均来自单次REPEATABLE_READ只读快照。跨请求新评可能改变代表：始终比较currentReviewId与屏幕主卡ID，若不一致，应丢弃历史并重新读取主列表。正式页面刷新当前页并折叠历史；接口不承诺整个浏览会话固定快照。游标失效可重试或刷新列表，不能把失败当作没有历史。
+
+| HTTP | 错误码 | 场景 |
+| --- | --- | --- |
+| 400 | REVIEW_INVALID_QUERY | 非法餐厅/作者ID |
+| 400 | REVIEW_INVALID_CURSOR | 非规范编码、跨餐厅/作者、锚点不存在或时间不匹配 |
+| 400 | COMMON_VALIDATION_FAILED / COMMON_MALFORMED_REQUEST | pageSize越界/类型错误或cursor超长 |
+| 401 | AUTH_UNAUTHENTICATED | 请求主动附带无效Bearer；正常匿名读取无需登录 |
+| 404 | RESTAURANT_NOT_FOUND | 父店不可见 |
+| 500 | COMMON_INTERNAL_SERVER_ERROR | 未预期读取故障 |
+
+前端点击“历史点评”首次打开面板才请求，每次5条，可加载更多；桌面为侧边面板，手机为底部面板。关闭取消在途历史和回复读取、恢复背景滚动与入口焦点；重开保留已载历史与草稿，失败原游标重试。换店、翻页和刷新卸载旧组件并忽略晚到响应。餐厅聚合/四维统计仍按用户要求暂缓，删除未开放；最新和历史点评的回复见第17节。
+
+## 17. 点评单层回复
+
+后端及正式前端已接通。复用V4回复表，无新增迁移。以下接口均返回统一ApiResponse外层及`Cache-Control: no-store`。路径reviewId为无前导零的Long范围正整数；最新和历史点评均可回复，停业餐厅可回复，父店删除时不可读写。
+
+前端两处共用ReplyThread：“查看回复”才发GET，每次10条；“回复”独立打开编辑器，列表与历史面板共享当前编辑焦点，只显示一个编辑框。取消或切换保留各点评草稿及失败请求编号。公开GET不附带过期凭证，POST固定发起时凭证；确认回执后清空草稿、关闭本编辑器并只刷新回复区，刷新失败不会误报发送失败。收起回复或关闭历史面板取消GET，切账号/点评或卸载使旧响应失效；取消POST不代表服务端一定未保存。成功刷新从第一页开始，长讨论通过“加载更多回复”继续查看，不改变外层点评分页、历史面板和评分。默认不显示回复总数，未新增计数或预览接口。
+
+### 17.1 发布回复
+
+`POST /api/reviews/{reviewId}/replies`，需要有效Bearer JWT、有效会话和正常账号；普通用户即可发布。作者只取认证上下文，不接受authorUserId、时间、子回复等额外字段。
+
+```json
+{"clientRequestId":"35a4d3f7-476d-4201-b698-d15880a14696","body":"谢谢分享，下次试试。"}
+```
+
+clientRequestId必填、规范UUID。body必填，去除首尾Unicode空白后1–200个码点，按纯文本使用，不解释HTML。首次保存201，data如下：
+
+```json
+{"replyId":"301","reviewId":"101","replayed":false}
+```
+
+同账号、同UUID、同点评及规范化正文重放返回200、原replyId及replayed=true；换正文或点评返回409。不同账号可用相同UUID。网络失败保留正文和UUID，同内容重试；修改内容属于新请求。唯一键与回复记录同生命周期，未来删除开放前需补删除后重放策略，当前不承诺永久防重。
+
+事务先定位父店，经restaurant公开服务锁父店并验证可见性，再锁点评、检查幂等、插入回复。唯一键或锁竞争最多重试三个完整事务，单次事务超时10秒，耗尽503。只写回复，不初始化或修改评分统计、不改点评时间或归组代表、不调用OSS，不将旧点评回复转移到新点评。
+
+### 17.2 分页读取回复
+
+`GET /api/reviews/{reviewId}/replies`，公开，无需登录。pageSize默认10，整数1–50；cursor可省略，或原样使用上一段nextCursor，最长200字符。data示例：
+
+```json
+{
+  "records":[{"id":"301","author":{"id":"11","username":"同学甲"},"body":"谢谢分享，下次试试。","createdAt":"2026-10-30T09:00:00.123456Z"}],
+  "hasMore":false,
+  "nextCursor":null
+}
+```
+
+按(createdAt,id)升序排除游标锚点，多取一条判断hasMore；有后续时nextCursor定位本段最后一条，否则为null。无回复返回空数组及false/null。只返回公开作者ID和用户名，缺失作者显示“用户不可用”，不返回邮箱、幂等材料或摘要。
+
+每段REPEATABLE_READ快照覆盖父点评、父店、锚点、正文和署名。非空段无游标固定4条查询，有游标5条；作者批量查询一次，无N+1。不保持跨段快照，后续新回复可出现在后段，没有主动推送。游标绑定点评、微秒时间和ID，验证规范编码及真实锚点，不是授权令牌。锚点消失或时间变化应重新加载。父锁内限制新回复时间不早于该点评最新回复，防时钟倒退导致新回复落在旧游标前。
+
+| HTTP | 错误码 | 场景 |
+| --- | --- | --- |
+| 400 | REPLY_INVALID_INPUT | 路径ID、UUID或正文非法 |
+| 400 | REPLY_INVALID_CURSOR | 游标编码、点评归属、真实锚点或时间校验失败 |
+| 400 | COMMON_VALIDATION_FAILED / COMMON_MALFORMED_REQUEST | 分页越界、类型错误、超长游标、非法JSON或未知字段 |
+| 401 | AUTH_UNAUTHENTICATED | 未登录写入、失效会话或停用账号；公开GET主动携带失效Bearer也被拒绝 |
+| 403 | AUTH_FORBIDDEN | 认证用户被服务端权限规则拒绝 |
+| 404 | REPLY_REVIEW_NOT_FOUND | 点评不存在 |
+| 404 | RESTAURANT_NOT_FOUND | 父店不存在或已删除，包含旧成功请求重放 |
+| 409 | REPLY_REQUEST_CONFLICT | 同账号UUID对应不同正文或点评 |
+| 409 | COMMON_DATA_CONFLICT | 其他数据库完整性约束失败 |
+| 503 | REPLY_TEMPORARILY_UNAVAILABLE | 唯一键/锁竞争、查询或事务超时重试耗尽 |
+| 500 | COMMON_INTERNAL_SERVER_ERROR | 未预期故障，不暴露SQL和正文 |

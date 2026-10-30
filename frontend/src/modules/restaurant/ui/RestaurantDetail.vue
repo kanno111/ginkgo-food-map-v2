@@ -19,6 +19,8 @@ const demo = computed(() => restaurant.value?.tags.includes('联调模拟') ?? f
 const distance = computed(() => (restaurant.value ? campusDistance(restaurant.value) : null))
 const copyFeedback = ref<string | null>(null)
 const manualCopyText = ref('')
+// 发布确认后只刷新点评，避免卸载发布回执，也不依赖尚未接通的餐厅评分统计。
+const reviewRevision = ref(0)
 
 /** 路由复用和失败重试都独立读取；取消旧请求，避免旧店资料覆盖新页面。 */
 async function loadDetail(): Promise<void> {
@@ -124,7 +126,7 @@ function shareRestaurant(): void {
       </div>
       <div class="detail-cup">
         <CupBadge :tier="tierOf(restaurant.score)" /><small>{{
-          restaurant.reviewCount ? '根据学生点评计算' : '等待真实的第一口'
+          restaurant.score === null ? '餐厅评级待接入' : '根据学生点评计算'
         }}</small>
       </div>
     </section>
@@ -140,7 +142,7 @@ function shareRestaurant(): void {
     <div class="detail-actions">
       <button type="button" @click="copyText(restaurant.address || restaurant.name)">
         复制地址</button
-      ><ReviewComposer :restaurant="restaurant" @published="loadDetail" />
+      ><ReviewComposer :restaurant="restaurant" @published="reviewRevision++" />
     </div>
     <div class="detail-layout">
       <div class="detail-main">
@@ -165,14 +167,19 @@ function shareRestaurant(): void {
               </dd>
             </div>
             <div>
-              <dt>学生点评</dt>
-              <dd>{{ restaurant.reviewCount }}<small> 条</small></dd>
+              <dt>点评统计</dt>
+              <dd>待接入</dd>
             </div>
           </dl>
           <ScoreRadar :dimensions="restaurant.dimensions" />
-          <p class="panel-note">没有评价的店显示“待评级”，不等于低分。杯型会根据真实评价计算。</p>
+          <p class="panel-note">餐厅汇总评分暂未接入，已发布点评请查看下方列表。</p>
         </section>
-        <ReviewPanel :key="restaurant.id" :restaurant-id="restaurant.id" @changed="loadDetail" />
+        <ReviewPanel
+          :key="restaurant.id"
+          :restaurant-id="restaurant.id"
+          :revision="reviewRevision"
+          @changed="loadDetail"
+        />
       </div>
       <aside class="detail-aside" aria-label="餐厅基本信息">
         <section class="address-panel">

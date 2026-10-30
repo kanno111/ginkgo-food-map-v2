@@ -36,6 +36,9 @@ describe('authenticated HTTP client', () => {
     await httpClient.get('/api/restaurant-categories')
     await httpClient.get('/api/restaurants')
     await httpClient.get('/api/restaurants/1')
+    await httpClient.get('/api/restaurants/1/reviews')
+    await httpClient.get('/api/restaurants/1/reviews/authors/22/history')
+    await httpClient.get('/api/reviews/10/replies')
     expect(sent[0]?.headers.Authorization).toBe('Bearer current-session')
     for (const config of sent.slice(1)) expect(config.headers.Authorization).toBeUndefined()
   })
@@ -47,10 +50,12 @@ describe('authenticated HTTP client', () => {
       return response(config)
     }
     await httpClient.get('/api/restaurants/1/management')
+    await httpClient.get('/api/restaurants/1/reviews/me/context')
     await httpClient.post('/api/restaurants', {})
     await httpClient.put('/api/restaurants/1', {})
     await httpClient.delete('/api/restaurants/1')
     await httpClient.post('/api/restaurants/1/restore')
+    await httpClient.post('/api/reviews/10/replies', {})
     for (const config of sent) expect(config.headers.Authorization).toBe('Bearer current-session')
   })
 

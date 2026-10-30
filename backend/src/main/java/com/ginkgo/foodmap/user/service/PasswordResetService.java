@@ -1,5 +1,7 @@
 package com.ginkgo.foodmap.user.service;
 
+import com.ginkgo.foodmap.user.policy.UserRegistrationPolicy;
+
 import com.ginkgo.foodmap.common.exception.BusinessException;
 import com.ginkgo.foodmap.user.domain.VerificationCodePurpose;
 import com.ginkgo.foodmap.user.dto.PasswordResetRequest;

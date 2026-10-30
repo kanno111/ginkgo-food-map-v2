@@ -52,7 +52,7 @@ class ReviewSchemaIntegrationTest {
     }
 
     @Test void freshAndRepeatedMigrationWithoutInventedContent() throws SQLException {
-        assertThat(migration(database,null).info().current().getVersion().getVersion()).isEqualTo("4");
+        assertThat(migration(database,null).info().current().getVersion().getVersion()).isEqualTo("7");
         assertThat(migration(database,null).migrate().migrationsExecuted).isZero();
         migration(database,null).validate();
         for (String table : List.of("reviews","review_replies","review_photos","media_files","restaurant_review_statistics"))
@@ -72,12 +72,61 @@ class ReviewSchemaIntegrationTest {
             update(c,"INSERT INTO restaurants(name,category_code,source_type,row_version) VALUES ('原店','OTHER','LEGACY_IMPORT',6)");
             update(c,"INSERT INTO restaurants(name,category_code,source_type,deleted_at,delete_reason_code) VALUES ('旧删除店','OTHER','LEGACY_IMPORT',CURRENT_TIMESTAMP(6),'SYSTEM')");
             update(c,"INSERT INTO restaurant_tags(restaurant_id,tag,position) SELECT id,'保留',0 FROM restaurants");
-            assertThat(migration(db,null).migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(migration(db,null).migrate().migrationsExecuted).isEqualTo(4);
             assertThat(number(c,"SELECT COUNT(*) FROM restaurant_review_statistics WHERE review_count=0 AND recommend_count=0 AND taste_sum=0 AND overall_score_sum=0")).isEqualTo(2);
             assertThat(number(c,"SELECT credential_version FROM users")).isEqualTo(9);
             assertThat(number(c,"SELECT row_version FROM restaurants WHERE name='原店'")).isEqualTo(6);
             assertThat(number(c,"SELECT COUNT(*) FROM restaurant_tags")).isEqualTo(2);
             assertThat(number(c,"SELECT COUNT(*) FROM reviews")).isZero();
+            assertThat(migration(db,null).migrate().migrationsExecuted).isZero();
+        }
+    }
+
+    /** 在有历史、同时间并列和缺失统计行的V4库上验证V5重建，不依赖空库假设。 */
+    @Test void upgradeV4SelectsLatestAuthorAndPreservesHistory() throws SQLException {
+        String db=createDatabase(); migration(db,"4").migrate();
+        try (Connection c=connect(db)) {
+            update(c,"INSERT INTO restaurants(id,name,category_code,source_type) VALUES (1,'升级店','OTHER','LEGACY_IMPORT'),(2,'空店','OTHER','LEGACY_IMPORT')");
+            update(c,"UPDATE restaurants SET deleted_at=CURRENT_TIMESTAMP(6),delete_reason_code='SYSTEM' WHERE id=1");
+            for (int i=0;i<3;i++) {
+                int score=i==0?8:i==1?6:9;
+                update(c,"INSERT INTO reviews(restaurant_id,author_user_id,taste_score,value_score,service_score,ambience_score,is_recommended,body,client_request_id,request_hash,created_at) VALUES (1,?,?,?,?,?,?, '真实升级测试正文',UUID_TO_BIN(?),UNHEX(REPEAT('11',32)),'2026-10-29 00:00:00')",i==2?2:1,score,score,score,score,i==1?0:1,UUID.randomUUID().toString());
+            }
+            assertThat(migration(db,null).migrate().migrationsExecuted).isEqualTo(3);
+            assertThat(number(c,"SELECT COUNT(*) FROM reviews")).isEqualTo(3);
+            assertThat(strings(c,"SELECT CONCAT(review_count,':',participant_count,':',recommend_count,':',overall_score_sum) FROM restaurant_review_statistics WHERE restaurant_id=1")).containsExactly("3:2:1:15.00");
+            assertThat(number(c,"SELECT participant_count FROM restaurant_review_statistics WHERE restaurant_id=2")).isZero();
+            assertThat(number(c,"SELECT COUNT(*) FROM restaurants WHERE deleted_at IS NOT NULL")).isEqualTo(1);
+            assertThat(number(c,"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND index_name='idx_reviews_restaurant_author_time'")).isEqualTo(4);
+            assertThat(migration(db,null).migrate().migrationsExecuted).isZero();
+        }
+    }
+
+    /** V5媒体数据在V6原样保留，新增上传状态仅对后续写入开放。 */
+    @Test void upgradeV5PreservesExistingMediaAndAllowsUploading() throws SQLException {
+        String db=createDatabase();migration(db,"5").migrate();
+        try(var c=connect(db)) {
+            update(c,mediaSql());
+            assertThat(migration(db,"6").migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(strings(c,"SELECT status FROM media_files")).containsExactly("TEMPORARY");
+            update(c,"UPDATE media_files SET status='UPLOADING'");
+            assertThat(strings(c,"SELECT status FROM media_files")).containsExactly("UPLOADING");
+            assertThat(migration(db,"6").migrate().migrationsExecuted).isZero();
+        }
+    }
+
+    /** V7保留V6已存在的两张关联，扩展后的第三至第五位置可写，第六位置仍被拒绝。 */
+    @Test void upgradeV6PreservesPhotosAndExtendsLimitToFive() throws SQLException {
+        String db=createDatabase();migration(db,"6").migrate();
+        try(var c=connect(db)) {
+            update(c,reviewSql(),1,UUID.randomUUID().toString());
+            long id=number(c,"SELECT id FROM reviews");
+            update(c,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,0,100),(?,1,101)",id,id);
+            assertThat(migration(db,null).migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(strings(c,"SELECT CONCAT(position,':',media_file_id) FROM review_photos ORDER BY position")).containsExactly("0:100","1:101");
+            update(c,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,2,102),(?,3,103),(?,4,104)",id,id,id);
+            assertThat(number(c,"SELECT COUNT(*) FROM review_photos")).isEqualTo(5);
+            assertThrows(SQLException.class,()->update(c,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,5,105)",id));
             assertThat(migration(db,null).migrate().migrationsExecuted).isZero();
         }
     }
@@ -130,7 +179,8 @@ class ReviewSchemaIntegrationTest {
     @Test void photosHaveTwoOrderedSlotsAndExclusiveFiles() throws SQLException {
         long a=review(1,UUID.randomUUID()), b=review(1,UUID.randomUUID());
         update(connection,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,0,100),(?,1,101)",a,a);
-        reject(3819,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,2,102)",a);
+        update(connection,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,2,102),(?,3,103),(?,4,104)",a,a,a);
+        reject(3819,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,5,105)",a);
         reject(1062,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (?,0,100)",b);
         reject(1452,"INSERT INTO review_photos(review_id,position,media_file_id) VALUES (9223372036854775807,0,102)");
     }
@@ -178,7 +228,7 @@ class ReviewSchemaIntegrationTest {
         update(connection,"INSERT INTO restaurant_review_statistics(restaurant_id) VALUES (?)",id);
         for(String assignment:List.of("recommend_count=1","taste_sum=0.5","overall_score_sum=0.01"))
             reject(3819,"UPDATE restaurant_review_statistics SET "+assignment);
-        update(connection,"UPDATE restaurant_review_statistics SET review_count=1,recommend_count=1,taste_sum=8,value_sum=8,service_sum=8,ambience_sum=7.5,overall_score_sum=7.88");
+        update(connection,"UPDATE restaurant_review_statistics SET review_count=1,participant_count=1,recommend_count=1,taste_sum=8,value_sum=8,service_sum=8,ambience_sum=7.5,overall_score_sum=7.88");
         reject(3819,"UPDATE restaurant_review_statistics SET overall_score_sum=10.01");
         reject(1451,"DELETE FROM restaurants WHERE id=?",id);
         reject(1452,"INSERT INTO restaurant_review_statistics(restaurant_id) VALUES (9223372036854775807)");

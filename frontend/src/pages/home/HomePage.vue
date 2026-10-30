@@ -14,7 +14,10 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
         <img :src="cover" alt="原版兔子举牌封面" width="36" height="36" />
         <figcaption>不好吃，就举牌子。</figcaption>
       </figure>
-      <RouterLink to="/scoring-guide">杯型评分说明 →</RouterLink>
+      <div class="footer-links">
+        <RouterLink to="/previews/review-history">多次点评展示预览 →</RouterLink
+        ><RouterLink to="/scoring-guide">杯型评分说明 →</RouterLink>
+      </div>
     </footer>
   </div>
 </template>
@@ -22,7 +25,13 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
 .discovery-page {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 8px 0 20px;
+  /* 首页局部暖色规范；底部安全距离沿用共享导航布局。 */
+  --discovery-border: #f0e9df;
+  color: #252525;
+  background: #fffbf5;
+  box-shadow: 0 0 0 100vmax #fffbf5;
+  clip-path: inset(0 -100vmax);
+  padding: 8px 0 32px;
 }
 .screen-reader-title {
   position: absolute;
@@ -45,6 +54,13 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
   padding: 18px 0;
   color: #8e8068;
   font-size: 12px;
+}
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  max-width: 60%;
 }
 .discovery-footer figure {
   display: flex;

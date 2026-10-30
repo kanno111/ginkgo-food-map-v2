@@ -1,5 +1,7 @@
 package com.ginkgo.foodmap.restaurant.service;
 
+import com.ginkgo.foodmap.restaurant.support.RestaurantIdentifiers;
+
 import com.ginkgo.foodmap.common.exception.BusinessException;
 import com.ginkgo.foodmap.restaurant.dto.RestaurantSaveRequest;
 import com.ginkgo.foodmap.restaurant.entity.RestaurantManagementEntity;

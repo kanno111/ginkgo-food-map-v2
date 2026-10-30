@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { inject, onUnmounted, ref, watch, computed } from 'vue'
+import { inject, onUnmounted, provide, ref, watch, computed } from 'vue'
+import { activeReplyEditorKey } from '../model/replyEditor'
 import { useRouter, useRoute } from 'vue-router'
 import { authToken } from '@/shared/api/authSession'
 import { useLoginStore } from '@/modules/auth/model/login.store'
-import { ratingDimensions } from '@/modules/restaurant/model/catalog.logic'
-import { reviewGatewayKey, unavailableReviewGateway, validBody, overall } from '../model/review'
+import ReviewEntry from './ReviewEntry.vue'
+import ReviewHistory from './ReviewHistory.vue'
+import { reviewGatewayKey, unavailableReviewGateway, validBody } from '../model/review'
 import type { ReviewItem } from '../model/review'
-const props = defineProps<{ restaurantId: string }>(),
+const props = defineProps<{ restaurantId: string; preview?: boolean; revision?: number }>(),
   emit = defineEmits<{ changed: [] }>()
 const gateway = inject(reviewGatewayKey, unavailableReviewGateway),
   auth = useLoginStore(),
@@ -24,20 +26,41 @@ const records = ref<ReviewItem[]>([]),
 let controller: globalThis.AbortController | undefined,
   generation = 0
 const replyRequests = new Map<string, { body: string; id: string }>()
+provide(activeReplyEditorKey, ref<string | null>(null))
+const page = ref(1),
+  totalPages = ref(0),
+  totalGroups = ref(0),
+  totalReviews = ref(0)
+let requestedPage = 1
+const currentOnly = ref(false)
+// 仅按明确的计分状态筛选；未知状态不自行猜测成历史或当前评分。
+const visibleRecords = computed(() =>
+  records.value.filter((item) => !currentOnly.value || item.scoringStatus === 'current'),
+)
+const hasScoringStatus = computed(() =>
+  records.value.some((item) => item.scoringStatus !== undefined),
+)
 const wall = computed(() =>
   [...new Map(records.value.flatMap((r) => r.photos).map((p) => [p.id, p])).values()].slice(0, 12),
 )
 /** 真实传输由适配器提供；未接通时显示失败状态，绝不使用模拟评价回填。 */
-async function load() {
+async function load(targetPage = page.value) {
   const ticket = ++generation
   controller?.abort()
   controller = new globalThis.AbortController()
   loading.value = true
   records.value = []
   error.value = ''
+  requestedPage = targetPage
   try {
-    const result = await gateway.list(props.restaurantId, controller.signal)
-    if (ticket === generation) records.value = result
+    const result = await gateway.list(props.restaurantId, controller.signal, targetPage)
+    if (ticket === generation) {
+      records.value = result.records
+      page.value = result.page
+      totalPages.value = result.totalPages
+      totalGroups.value = result.totalGroups
+      totalReviews.value = result.totalReviews
+    }
   } catch (reason) {
     if (ticket === generation)
       error.value = reason instanceof Error ? reason.message : '评价加载失败，请重试。'
@@ -46,8 +69,12 @@ async function load() {
   }
 }
 watch(
-  () => props.restaurantId,
-  () => void load(),
+  () => [props.restaurantId, props.revision],
+  () => {
+    page.value = 1
+    totalPages.value = totalGroups.value = totalReviews.value = 0
+    void load(1)
+  },
   { immediate: true },
 )
 watch(authToken, () => {
@@ -134,80 +161,76 @@ function view(url: string) {
   <section class="review-panel" aria-labelledby="reviews-title">
     <header>
       <h2 id="reviews-title">同学点评</h2>
-      <button type="button" :disabled="loading" @click="load">刷新评价</button>
+      <button type="button" :disabled="loading" @click="load(1)">刷新评价</button>
     </header>
+    <p v-if="!preview && !loading && !error" class="scoring-rule">
+      {{ totalGroups }}位同学 · {{ totalReviews }}条点评。每位同学展示最新点评。
+    </p>
+    <template v-if="preview && hasScoringStatus">
+      <p class="scoring-rule">
+        同一账号可记录多次用餐，只有最新一条有效点评参与评分；历史点评仍可阅读。
+      </p>
+      <div class="review-tabs" aria-label="点评显示范围">
+        <button type="button" :aria-pressed="!currentOnly" @click="currentOnly = false">
+          全部用餐记录
+        </button>
+        <button type="button" :aria-pressed="currentOnly" @click="currentOnly = true">
+          只看当前计分
+        </button>
+      </div>
+    </template>
     <p v-if="loading" role="status">正在加载评价…</p>
     <div v-else-if="error" role="alert">
       <p>{{ error }}</p>
-      <button type="button" @click="load">重试</button>
+      <button type="button" @click="load(requestedPage)">重试</button>
     </div>
     <p v-else-if="!records.length" class="empty">还没有人评价，来当第一个吧。</p>
-    <details v-if="wall.length" class="student-album">
+    <details v-if="preview && wall.length" class="student-album">
       <summary>同学上传的照片（{{ wall.length }}） · 查看照片与原点评</summary>
       <p>下方各条点评保留作者和照片对应关系，点击照片可查看大图。</p>
     </details>
-    <div class="photos">
+    <div v-if="preview" class="photos">
       <button v-for="p in wall" :key="p.id" type="button" @click="view(p.url)">
         <img :src="p.url" alt="餐厅评价照片" loading="lazy" />
       </button>
     </div>
-    <article v-for="item in records" :key="item.id" class="review-card">
-      <header>
-        <span class="avatar">{{ Array.from(item.username)[0] }}</span>
-        <div>
-          <strong>{{ item.username }}</strong
-          ><time :datetime="item.createdAt">{{
-            new Date(item.createdAt).toLocaleString('zh-CN')
-          }}</time>
-        </div>
-        <span class="verdict"
-          >{{ item.recommended ? '推荐' : '不推荐' }} · {{ overall(item.scores).toFixed(2) }}</span
-        >
-      </header>
-      <p class="chips">
-        <span v-for="d in ratingDimensions" :key="d.key"
-          >{{ d.label }} {{ item.scores[d.key].toFixed(1) }}</span
-        >
-      </p>
-      <p class="body">{{ item.body }}</p>
-
-      <div class="photos">
-        <button v-for="p in item.photos" :key="p.id" type="button" @click="view(p.url)">
-          <img :src="p.url" alt="评价照片" loading="lazy" />
-        </button>
-      </div>
-      <button v-if="item.canDelete && auth.authenticated" type="button" @click="askDelete(item)">
-        删除评价
+    <ReviewEntry
+      v-for="item in visibleRecords"
+      :key="item.id"
+      :item="item"
+      :preview="preview"
+      :authenticated="auth.authenticated"
+      :busy="busy"
+      :reply-texts="texts"
+      :show-history="!currentOnly"
+      :replies-enabled="gateway.supportsReplies !== false"
+      @delete="askDelete"
+      @photo="view"
+      @reply="reply"
+      @text="(id, text) => (texts[id] = text)"
+    >
+      <template v-if="!preview && gateway.history && item.historyCount" #history>
+        <ReviewHistory :restaurant-id="restaurantId" :item="item" @photo="view" @refresh="load()" />
+      </template>
+    </ReviewEntry>
+    <nav
+      v-if="!loading && !error && totalPages > 1"
+      class="review-pagination"
+      aria-label="点评分页"
+    >
+      <button type="button" :disabled="page <= 1" @click="load(page - 1)">上一页点评</button>
+      <span aria-live="polite">第{{ page }} / {{ totalPages }}页</span>
+      <button type="button" :disabled="page >= totalPages" @click="load(page + 1)">
+        下一页点评
       </button>
-      <details class="review-evidence">
-        <summary>含{{ item.photos.length }}张照片 · 评价依据 ›</summary>
-        <p>
-          发布时间：{{ new Date(item.createdAt).toLocaleString('zh-CN') }}。{{
-            item.photos.length ? '照片由作者上传，未核验到店。' : '本条未附照片。'
-          }}账号和附图不构成真实性保证。
-        </p>
-      </details>
-      <div class="replies">
-        <p v-for="answer in item.replies" :key="answer.id">
-          <strong>{{ answer.username }}</strong
-          >：{{ answer.body
-          }}<time :datetime="answer.createdAt">{{
-            new Date(answer.createdAt).toLocaleDateString('zh-CN')
-          }}</time>
-        </p>
-        <form @submit.prevent="reply(item)">
-          <input
-            v-model="texts[item.id]"
-            :aria-label="'回复' + item.username"
-            placeholder="说点什么（1–200字）"
-            @keydown.enter="$event.isComposing && $event.preventDefault()"
-          /><button :disabled="busy">回复</button>
-        </form>
-      </div>
-    </article>
+    </nav>
     <dialog ref="confirm">
       <h3>确定删除这条评价？</h3>
       <p>回复和照片将一并删除，删除后无法恢复。</p>
+      <p v-if="deleting?.scoringStatus === 'current'">
+        删除后，你在这家店的上一条有效点评会重新参与评分；没有历史点评时移除你的评分。
+      </p>
+      <p v-if="preview">当前仅演示页面变化，不会删除真实数据，可通过“重置示例”恢复。</p>
       <button type="button" @click="cancelDelete">取消</button
       ><button type="button" :disabled="busy" @click="remove">确认删除</button>
     </dialog>
@@ -218,6 +241,30 @@ function view(url: string) {
   </section>
 </template>
 <style scoped>
+.scoring-rule {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #82745f;
+  background: #fff8e9;
+  padding: 12px;
+  border-radius: 10px;
+}
+.review-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.review-tabs button {
+  border-radius: 20px;
+  font-size: 12px;
+  min-height: 40px;
+}
+.review-tabs button[aria-pressed='true'] {
+  background: #fff2cc;
+  border-color: #e9b949;
+  color: #7a5515;
+}
 .review-panel {
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -256,51 +303,14 @@ button {
   text-align: center;
   color: #80735d;
 }
-.review-card {
-  padding: 22px 0;
-  border-top: 1px solid #e8dfd0;
-  margin-top: 20px;
-}
-.review-card header {
-  justify-content: flex-start;
-  font-size: 13px;
-}
-.avatar {
-  background: #e9b949;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-}
-.verdict {
-  margin-left: auto;
-  color: #8d6535;
-}
-time {
-  display: block;
-  font-size: 11px;
-  color: #92836b;
-  margin-top: 5px;
-}
-.body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  line-height: 1.8;
-  font-size: 14px;
-}
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 12px;
-  color: #8c754f;
-}
 .photos {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin: 14px 0;
+}
+.photos:empty {
+  display: none;
 }
 .photos button {
   padding: 0;
@@ -311,30 +321,6 @@ time {
   height: 82px;
   object-fit: cover;
   border-radius: 8px;
-}
-.replies {
-  background: #f6f0e4;
-  padding: 14px;
-  border-radius: 10px;
-  margin-top: 14px;
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-.replies form {
-  display: flex;
-  gap: 8px;
-}
-.replies form button {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.replies input {
-  min-width: 0;
-  width: 100%;
-  border: 1px solid #dfd2ba;
-  border-radius: 7px;
-  padding: 10px;
-  font: inherit;
 }
 dialog {
   max-width: calc(100% - 28px);
@@ -384,17 +370,20 @@ dialog::backdrop {
 .review-panel {
   background: white;
 }
-.review-card {
-  padding-top: 16px;
+.review-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+  font-size: 13px;
 }
-.review-card .avatar {
-  flex-shrink: 0;
+button {
+  min-height: 44px;
 }
-.review-card header > div {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.verdict {
-  white-space: nowrap;
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

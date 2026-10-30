@@ -1,7 +1,6 @@
 package com.ginkgo.foodmap.user.service;
 
 import com.ginkgo.foodmap.common.exception.BusinessException;
-import com.ginkgo.foodmap.user.config.VerificationMailProperties;
 import com.ginkgo.foodmap.user.config.VerificationCodeProperties;
 import com.ginkgo.foodmap.user.config.VerificationCodeRedisScripts;
 import com.ginkgo.foodmap.user.domain.VerificationCodePurpose;
@@ -12,9 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.mail.MailException;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -48,8 +44,7 @@ public class VerificationCodeService {
     private final StringRedisTemplate redisTemplate;
     private final VerificationCodeProperties properties;
     private final VerificationCodeRedisScripts scripts;
-    private final JavaMailSender mailSender;
-    private final VerificationMailProperties mailProperties;
+    private final com.ginkgo.foodmap.user.mail.VerificationMailSender mailSender;
     private final SecureRandom secureRandom = new SecureRandom();
 
     /**
@@ -65,8 +60,8 @@ public class VerificationCodeService {
     public void send(VerificationCodePurpose purpose, String email) {
         VerificationCodeReservation reservation = reserve(purpose, email);
         try {
-            mailSender.send(createMailMessage(reservation));
-        } catch (MailException exception) {
+            mailSender.send(reservation);
+        } catch (BusinessException exception) {
             cancelAfterMailFailure(reservation);
             log.error("Verification code mail delivery failed; exceptionType={}", exception.getClass().getName());
             throw new BusinessException(VerificationCodeErrorCode.MAIL_DELIVERY_FAILED);
@@ -186,27 +181,6 @@ public class VerificationCodeService {
             log.error("Verification code Redis operation failed; exceptionType={}", exception.getClass().getName());
             throw new BusinessException(VerificationCodeErrorCode.SERVICE_UNAVAILABLE);
         }
-    }
-
-    private SimpleMailMessage createMailMessage(VerificationCodeReservation reservation) {
-        String operationName = switch (reservation.getPurpose()) {
-            case REGISTER -> "注册";
-            case PASSWORD_RESET -> "密码重置";
-        };
-        long validMinutes = Math.max(1, properties.getTimeToLive().toMinutes());
-
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(mailProperties.getFrom());
-        message.setTo(reservation.getRecipientEmail());
-        message.setSubject(mailProperties.getSubjectPrefix() + operationName + "验证码");
-        message.setText("""
-                您好：
-
-                您正在进行%s操作，本次验证码为：%s
-
-                验证码在%d分钟内有效，请勿向任何人泄露。如非本人操作，请忽略本邮件。
-                """.formatted(operationName, reservation.getCode(), validMinutes));
-        return message;
     }
 
     private void cancelAfterMailFailure(VerificationCodeReservation reservation) {

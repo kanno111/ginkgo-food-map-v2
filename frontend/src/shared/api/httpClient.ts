@@ -19,14 +19,17 @@ const publicAuthPaths = new Set([
 
 httpClient.interceptors.request.use((config) => {
   const token = getAccessToken()
-  // 三个公开餐厅GET默认匿名读取；管理资料和所有写操作仍携带凭证。
+  // 餐厅与点评主列表GET默认匿名读取；管理资料和所有写操作仍携带凭证。
   // 避免过期登录阻止匿名浏览，也避免公开目录不必要地依赖Redis会话服务。
   const path = (config.url ?? '').split('?')[0] ?? ''
   const publicRestaurantRead =
     config.method === 'get' &&
     (path === '/api/restaurant-categories' ||
       path === '/api/restaurants' ||
-      /^\/api\/restaurants\/[^/]+$/.test(path))
+      /^\/api\/restaurants\/[^/]+$/.test(path) ||
+      /^\/api\/restaurants\/[^/]+\/reviews$/.test(path) ||
+      /^\/api\/restaurants\/[^/]+\/reviews\/authors\/[^/]+\/history$/.test(path) ||
+      /^\/api\/reviews\/[^/]+\/replies$/.test(path))
   if (
     token &&
     !publicAuthPaths.has(path) &&

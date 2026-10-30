@@ -1,4 +1,9 @@
 spring:
+  servlet:
+    multipart:
+      # 单文件300KiB，额外为multipart边界预留少量空间；解码层再次校验实际内容。
+      max-file-size: 300KB
+      max-request-size: 320KB
   application:
     name: ginkgo-food-map-v2
   datasource:
@@ -62,6 +67,15 @@ management:
       show-details: never
 
 app:
+  file:
+    oss:
+      enabled: ${OSS_ENABLED:false}
+      endpoint: ${OSS_ENDPOINT:}
+      region: ${OSS_REGION:}
+      bucket: ${OSS_BUCKET:}
+      prefix: review-images/
+      temporary-ttl: 24h
+      cleanup-delay-ms: 60000
   user:
     # 注册规则属于 user 模块，允许域名支持逗号分隔的配置列表。
     registration:

@@ -1,5 +1,7 @@
 package com.ginkgo.foodmap.restaurant.service;
 
+import com.ginkgo.foodmap.restaurant.support.RestaurantIdentifiers;
+
 import com.ginkgo.foodmap.common.exception.BusinessException;
 import com.ginkgo.foodmap.restaurant.dto.RestaurantListQuery;
 import com.ginkgo.foodmap.restaurant.entity.RestaurantEntity;
@@ -27,6 +29,11 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class RestaurantReadService {
     private final RestaurantCatalogMapper mapper;
+
+    /** 面向其他模块的只读可见性校验，不初始化统计、不取得写锁。 */
+    public void requireVisible(long id) {
+        if(mapper.selectVisibleById(id)==null)throw new BusinessException(RestaurantErrorCode.NOT_FOUND);
+    }
 
     /** 返回受控分类全集及启用状态，历史分类不会因停用而消失。 */
     public List<RestaurantCategoryVo> categories() {

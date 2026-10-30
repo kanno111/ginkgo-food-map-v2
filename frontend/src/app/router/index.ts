@@ -3,7 +3,17 @@ import { createRouter, createWebHistory } from 'vue-router'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    ...(['map', 'messages', 'account'] as const).map(kind => ({path: `/${kind}`, component: () => import('@/pages/home/CapabilityPage.vue'), props: {kind}, meta: {title: {map:'地图',messages:'消息',account:'我的'}[kind]}})),
+    {
+      path: '/previews/review-history',
+      component: () => import('@/pages/review/ReviewHistoryPreviewPage.vue'),
+      meta: { title: '多次点评展示预览' },
+    },
+    ...(['map', 'messages', 'account'] as const).map((kind) => ({
+      path: `/${kind}`,
+      component: () => import('@/pages/home/CapabilityPage.vue'),
+      props: { kind },
+      meta: { title: { map: '地图', messages: '消息', account: '我的' }[kind] },
+    })),
     {
       path: '/restaurants/new',
       name: 'restaurant-create',
