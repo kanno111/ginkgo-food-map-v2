@@ -52,8 +52,10 @@ jobs:
           AUTH_TEST_DB_PASSWORD: ci-only-mysql-password
           # 餐厅迁移测试使用同一个临时MySQL服务，但创建自己专属的随机数据库。
           RESTAURANT_TEST_DB_PASSWORD: ci-only-mysql-password
-          # 评价结构使用独立随机库验证V4，不访问真实业务库或OSS。
+          # 点评与回复使用独立随机库验证完整迁移链，不访问真实业务库或OSS。
           REVIEW_TEST_DB_PASSWORD: ci-only-mysql-password
+          # 回复集成测试要求显式指定隔离服务器；连接本作业的临时MySQL容器。
+          REVIEW_TEST_DB_SERVER: jdbc:mysql://127.0.0.1:3306/
         run: mvn --batch-mode --no-transfer-progress verify -Dredis.integration=true -Dauth.integration=true -Drestaurant.integration=true -Dreview.integration=true
       - name: Save test reports even on failure
         if: always()

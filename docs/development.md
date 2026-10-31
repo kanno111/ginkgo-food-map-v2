@@ -1,5 +1,12 @@
 # 当前开发记录
 
+## 2026-10-31：修复GitHub CI回复测试缺少数据库地址
+
+- 核对GitHub Actions运行41164249805（develop/fcf2b16）：前端及部署脚本检查通过，后端407项测试中12项回复测试初始化失败，自动部署跳过。根因是ReplyApiIntegrationTest要求显式REVIEW_TEST_DB_SERVER，工作流只提供密码，url()因缺少地址抛出NullPointerException；不是回复业务断言失败。
+- .github/workflows/ci-cd.yml为后端验证步骤补齐jdbc:mysql://127.0.0.1:3306/，对应本作业临时MySQL容器映射端口；保留测试的显式回环地址校验、全部集成开关及部署门禁，修正过时的V4测试注释。不修改业务代码、接口或数据库迁移。
+- 本机Java21、独立回环3322的MySQL8.4及既有Redis执行与CI相同的完整mvn verify，auth/redis/restaurant/review四项集成全部开启：407项中406项实际通过、1项真实OSS测试按开关跳过，零失败/错误，JAR打包成功；原报错的12项回复测试全部通过。随机测试库自行清理，临时MySQL验证后关闭，开发业务库及前后端服务未改动。
+- 工作流YAML解析、MySQL地址/端口/密码匹配、四项集成开关及git diff --check通过。证据保存在仓库外ci-failure-41164249805/backend-verify.log与ci-fix-backend-verify.log。本轮仅修改工作流和本日志，未新建分支、提交或推送；GitHub重新运行及自动部署结果仍待修复提交推送后验证。
+
 ## 2026-10-31：完成本人点评删除的前后端闭环
 
 - 最新及历史点评仅在已认证账号ID等于作者ID时显示删除入口，昵称相同或管理员角色不能代替归属；DELETE /api/reviews/{reviewId}始终由后端从安全上下文取身份并校验。二次确认支持取消/Escape，历史面板关闭后释放滚动锁再确认；失败留在确认框内重试，成功回点评第一页并刷新餐厅统计。
