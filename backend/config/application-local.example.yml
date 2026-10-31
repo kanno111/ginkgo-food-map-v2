@@ -36,6 +36,19 @@ spring:
       "[mail.smtp.writetimeout]": 5000
 
 app:
+  file:
+    oss:
+      # Bucket为私有；在未跟踪的application-local.yml中填好位置和凭证后开启。
+      # 凭证仅允许本Bucket的review-images/*对象PutObject/GetObject/DeleteObject。
+      # Bucket保持私有且未启用版本控制；真实AccessKey不能写入这个example文件。
+      enabled: false
+      endpoint: https://oss-cn-hangzhou.aliyuncs.com
+      region: cn-hangzhou
+      bucket: replace-with-development-bucket
+      # 两者同时填写则优先使用；都留空时读取OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET环境变量。
+      access-key-id: ""
+      access-key-secret: ""
+      temporary-ttl: 24h
   user:
     verification-code:
       # 请替换为至少32个字符的本机随机密钥；该值只用于计算验证码 HMAC。

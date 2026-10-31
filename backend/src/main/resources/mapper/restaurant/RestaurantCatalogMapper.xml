@@ -1,17 +1,54 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper">
-    <!-- 显式列白名单不加载创建者和删除信息；所有坐标均为GCJ-02，参考点沿用原页面。 -->
+    <!-- 兼容旧版本后建餐厅缺失零统计行；公开读取不初始化数据，不跨模块关联reviews。 -->
+    <sql id="catalogFrom">
+        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        LEFT JOIN restaurant_review_statistics s ON s.restaurant_id = r.id
+    </sql>
+
+    <!-- 判档使用精确乘法，避免循环小数除法或展示四舍五入把8.599...推入全家桶。 -->
+    <sql id="tierExpression">
+        CASE WHEN COALESCE(s.participant_count, 0) = 0 THEN 'none'
+            WHEN s.overall_score_sum &gt;= 8.6 * s.participant_count THEN 'bucket'
+            WHEN s.overall_score_sum &gt;= 7.4 * s.participant_count THEN 'super'
+            WHEN s.overall_score_sum &gt;= 6.2 * s.participant_count THEN 'large'
+            WHEN s.overall_score_sum &gt;= 5.0 * s.participant_count THEN 'medium'
+            ELSE 'small' END
+    </sql>
+
+    <!--
+        参考点来源为原站index.html的CAMPUS定义（30.7544,103.9312，清水河校区），
+        沿用既有距离排序的GCJ-02坐标和6371km地球半径；不是校园边界或步行距离。
+        统一以米计算，WHERE与返回距离复用同一表达式，防止阈值/排序口径漂移。
+        待确认、缺坐标或异常坐标均不计算；LEAST/GREATEST防止浮点误差超出ASIN定义域。
+    -->
+    <sql id="distanceMetersExpression">
+        CASE WHEN r.needs_location = 0 AND r.latitude BETWEEN -90 AND 90
+            AND r.longitude BETWEEN -180 AND 180 AND r.coordinate_system = 'GCJ02'
+            THEN 6371000 * 2 * ASIN(SQRT(LEAST(1.0, GREATEST(0.0,
+                POWER(SIN(RADIANS(r.latitude - 30.7544) / 2), 2)
+                + COS(RADIANS(30.7544)) * COS(RADIANS(r.latitude))
+                * POWER(SIN(RADIANS(r.longitude - 103.9312) / 2), 2)))))
+            ELSE NULL END
+    </sql>
+
+    <!-- 显式列白名单不加载创建者和删除信息；公开distanceKm字段继续使用公里，保持原契约。 -->
     <sql id="publicColumns">
         r.id, r.name, r.category_code, c.name AS category_name, r.price_per_person, r.price_kind,
         r.address, r.latitude, r.longitude, r.coordinate_system, r.needs_location,
         r.business_status, r.source_type, r.created_at, r.updated_at,
-        CASE WHEN r.needs_location = 0 AND r.latitude IS NOT NULL AND r.longitude IS NOT NULL
-            THEN 6371 * 2 * ASIN(SQRT(LEAST(1.0, GREATEST(0.0,
-                POWER(SIN(RADIANS(r.latitude - 30.7544) / 2), 2)
-                + COS(RADIANS(30.7544)) * COS(RADIANS(r.latitude))
-                * POWER(SIN(RADIANS(r.longitude - 103.9312) / 2), 2)))))
-            ELSE NULL END AS distance_km
+        COALESCE(s.review_count, 0) AS review_count,
+        COALESCE(s.participant_count, 0) AS participant_count,
+        <!-- 扩展十进制精度再除法，避免MySQL默认6位小数丢失排序差异；不做展示舍入。 -->
+        CAST(s.overall_score_sum AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS score,
+        CAST(s.recommend_count AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS recommend_rate,
+        CAST(s.taste_sum AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS taste,
+        CAST(s.value_sum AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS value,
+        CAST(s.service_sum AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS service,
+        CAST(s.ambience_sum AS DECIMAL(40,20)) / NULLIF(s.participant_count, 0) AS ambience,
+        <include refid="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper.tierExpression"/> AS tier,
+        (<include refid="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper.distanceMetersExpression"/>) / 1000 AS distance_km
     </sql>
 
     <!-- COUNT和分页复用同一可见集合；EXISTS使同店多个命中标签仍只算一家店。 -->
@@ -19,7 +56,24 @@
         WHERE r.deleted_at IS NULL
         <if test="query.category != ''">AND r.category_code = #{query.category}</if>
         <if test="query.hideClosed">AND r.business_status = 'OPERATING'</if>
-        <if test="query.excludesUnrated">AND 1 = 0</if>
+        <!-- 两项均在COUNT与LIMIT之前执行；NULL不能通过上限比较，未知值不会当作0。 -->
+        <if test="query.maxPrice != null">
+            AND r.price_kind != 'UNKNOWN' AND r.price_per_person &lt;= #{query.maxPrice}
+        </if>
+        <if test="query.maxDistanceMeters != null">
+            AND (<include refid="distanceMetersExpression"/>) &lt;= #{query.maxDistanceMeters}
+        </if>
+        <if test="!query.tiers.isEmpty()">
+            AND (<include refid="tierExpression"/>) IN
+            <foreach collection="query.tiers" item="tier" open="(" close=")" separator=",">#{tier}</foreach>
+        </if>
+        <!-- 推荐视图沿用原产品大杯及以上，踩雷为小杯；与用户独立推荐率无关。 -->
+        <if test="query.view == 'recommended'">
+            AND s.participant_count &gt; 0 AND s.overall_score_sum &gt;= 6.2 * s.participant_count
+        </if>
+        <if test="query.view == 'pitfall'">
+            AND s.participant_count &gt; 0 AND s.overall_score_sum &lt; 5.0 * s.participant_count
+        </if>
         <if test="query.keyword.strip() != ''">
             AND (r.name LIKE #{query.keywordPattern} ESCAPE '!'
                 OR r.address LIKE #{query.keywordPattern} ESCAPE '!'
@@ -35,24 +89,30 @@
 
     <select id="selectVisibleById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantEntity">
         SELECT <include refid="publicColumns"/>
-        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        <include refid="catalogFrom"/>
         WHERE r.id = #{id} AND r.deleted_at IS NULL
     </select>
 
     <select id="countVisible" resultType="long">
-        SELECT COUNT(*) FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        SELECT COUNT(*) <include refid="catalogFrom"/>
         <include refid="visibleConditions"/>
     </select>
 
     <select id="selectVisiblePage" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantEntity">
         SELECT <include refid="publicColumns"/>
-        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code
+        <include refid="catalogFrom"/>
         <include refid="visibleConditions"/>
-        <!-- 不使用客户端SQL片段。M1所有评分及评价数相同，相关排序退化为名称和ID。 -->
+        <!-- 白名单排序在LIMIT前执行；评分降序且null末尾，同分沿用名称及ID稳定次序。 -->
         ORDER BY
         <choose>
             <when test="query.sort == 'price'">r.price_per_person IS NULL, r.price_per_person,</when>
             <when test="query.sort == 'distance'">distance_km IS NULL, distance_km,</when>
+            <when test="query.sort == 'score'">score IS NULL, score DESC,</when>
+            <when test="query.sort == 'taste'">taste IS NULL, taste DESC,</when>
+            <when test="query.sort == 'value'">value IS NULL, value DESC,</when>
+            <when test="query.sort == 'service'">service IS NULL, service DESC,</when>
+            <when test="query.sort == 'ambience'">ambience IS NULL, ambience DESC,</when>
+            <when test="query.sort == 'reviews'">review_count DESC,</when>
         </choose>
         r.name, r.id
         LIMIT #{query.pageSize} OFFSET #{query.offset}

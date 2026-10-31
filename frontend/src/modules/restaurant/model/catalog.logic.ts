@@ -1,37 +1,4 @@
-import type {
-  CatalogFilters,
-  CupTier,
-  RatingDimension,
-  RestaurantReadModel,
-} from './restaurant.types'
-
-/** 阈值、颜色与标语逐项沿用原版 TIERS/TIER_NONE；待评级不能当成踩雷。 */
-export const cupTiers: {
-  key: CupTier
-  label: string
-  range: string
-  color: string
-  description: string
-}[] = [
-  {
-    key: 'bucket',
-    label: '全家桶',
-    range: '8.6–10',
-    color: '#C0392B',
-    description: '神店，冲',
-  },
-  { key: 'super', label: '超大杯', range: '7.4–8.6', color: '#B5651D', description: '强推' },
-  { key: 'large', label: '大杯', range: '6.2–7.4', color: '#C98A4B', description: '值得一去' },
-  { key: 'medium', label: '中杯', range: '5.0–6.2', color: '#D8B98A', description: '中规中矩' },
-  { key: 'small', label: '小杯', range: '0–5.0', color: '#8A94A6', description: '踩雷预警' },
-  {
-    key: 'none',
-    label: '待评级',
-    range: '暂无评价',
-    color: '#B9B2A4',
-    description: '等你来评',
-  },
-]
+import type { CatalogFilters, RatingDimension, RestaurantReadModel } from './restaurant.types'
 
 export const ratingDimensions: { key: RatingDimension; label: string; description: string }[] = [
   { key: 'taste', label: '味道', description: '调味、火候与食材，吃完还想不想再来。' },
@@ -39,16 +6,6 @@ export const ratingDimensions: { key: RatingDimension; label: string; descriptio
   { key: 'service', label: '服务', description: '态度、出餐速度，以及用餐中的照顾。' },
   { key: 'ambience', label: '环境', description: '卫生、座位与噪音，能否舒服吃顿饭。' },
 ]
-
-/** 只按原始分数判档，显示为8.6的8.55仍属于超大杯；不在前端伪造聚合分数。 */
-export function tierOf(score: number | null): CupTier {
-  if (score === null || !Number.isFinite(score) || score < 0 || score > 10) return 'none'
-  if (score >= 8.6) return 'bucket'
-  if (score >= 7.4) return 'super'
-  if (score >= 6.2) return 'large'
-  if (score >= 5) return 'medium'
-  return 'small'
-}
 
 /** 参考点为清水河校区，计算直线公里数；位置未确认时不显示虚构距离。 */
 export function campusDistance(restaurant: RestaurantReadModel): number | null {
@@ -96,10 +53,6 @@ export function filterRestaurants(
         .includes(keyword)
     )
       return false
-    const tier = tierOf(restaurant.score)
-    if (filters.tiers.length && !filters.tiers.includes(tier)) return false
-    if (filters.view === 'recommended' && !['bucket', 'super', 'large'].includes(tier)) return false
-    if (filters.view === 'pitfall' && tier !== 'small') return false
     return true
   })
   const value = (restaurant: RestaurantReadModel): number | null => {

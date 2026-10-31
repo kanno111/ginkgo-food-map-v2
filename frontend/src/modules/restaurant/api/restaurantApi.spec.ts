@@ -22,7 +22,7 @@ afterEach(() => {
   clearAccessToken()
 })
 
-/** 使用真实Axios配置验证重复tiers参数、路径和模型转换，防止前后端协议漂移。 */
+/** 使用真实Axios配置验证查询白名单、路径和模型转换，防止前后端协议漂移。 */
 describe('restaurant HTTP API', () => {
   it('keeps authenticated CRUD on the captured session and never adds a version or DELETE body', async () => {
     const requests: InternalAxiosRequestConfig[] = []
@@ -64,6 +64,9 @@ describe('restaurant HTTP API', () => {
     expect(value.id).toBe('9007199254740993')
     expect(value.price).toBeNull()
     expect(value.score).toBeNull()
+    expect(
+      toRestaurantModel({ ...responseFixture, score: 0, participantCount: 2, reviewCount: 7 }),
+    ).toMatchObject({ score: 0, participantCount: 2, reviewCount: 7 })
     expect(value.distanceKm).toBeNull()
     expect(value.closed).toBe(false)
     expect(
@@ -84,7 +87,7 @@ describe('restaurant HTTP API', () => {
     })
   })
 
-  it('sends every filter and page without bracketed tiers', async () => {
+  it('sends only current filters and pages without legacy rating conditions', async () => {
     let requested!: InternalAxiosRequestConfig
     httpClient.defaults.adapter = async (config) => {
       requested = config
@@ -103,20 +106,23 @@ describe('restaurant HTTP API', () => {
       {
         keyword: '火锅%_',
         category: 'HOT_POT',
-        tiers: ['none', 'small'],
-        view: 'all',
         sort: 'price',
         hideClosed: true,
+        maxPrice: 30,
+        maxDistanceMeters: 1000,
       },
       3,
       8,
     )
     const url = new URL(httpClient.getUri(requested), 'http://test.local')
-    expect(url.searchParams.getAll('tiers')).toEqual(['none', 'small'])
+    expect(url.searchParams.has('tiers')).toBe(false)
+    expect(url.searchParams.has('view')).toBe(false)
     expect(url.searchParams.has('tiers[]')).toBe(false)
     expect(url.searchParams.get('keyword')).toBe('火锅%_')
     expect(url.searchParams.get('page')).toBe('3')
     expect(url.searchParams.get('hideClosed')).toBe('true')
+    expect(url.searchParams.get('maxPrice')).toBe('30')
+    expect(url.searchParams.get('maxDistanceMeters')).toBe('1000')
     expect(result.total).toBe(19)
     expect(result.records[0]?.id).toBe(responseFixture.id)
   })

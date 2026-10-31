@@ -68,8 +68,7 @@ class VerificationCodeServiceRedisIntegrationTest {
                         script("redis/verification-code-cancel.lua"),
                         script("redis/verification-code-consume.lua")
                 ),
-                org.mockito.Mockito.mock(JavaMailSender.class),
-                mailProperties()
+                new com.ginkgo.foodmap.user.mail.VerificationMailSender(org.mockito.Mockito.mock(JavaMailSender.class), properties, mailProperties())
         );
     }
 

@@ -5,9 +5,9 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { toErrorMessage } from '@/shared/lib/toErrorMessage'
 import { fetchRestaurant } from '../api/restaurantApi'
 import type { RestaurantReadModel } from '../model/restaurant.types'
-import { campusDistance, priceLabel, tierOf } from '../model/catalog.logic'
-import CupBadge from './CupBadge.vue'
+import { campusDistance, priceLabel } from '../model/catalog.logic'
 import RestaurantManagementActions from './RestaurantManagementActions.vue'
+import { useRestaurantCatalog } from '../model/catalog.store'
 
 const props = defineProps<{ id: string }>()
 const restaurant = ref<RestaurantReadModel | null>(null)
@@ -19,9 +19,49 @@ const demo = computed(() => restaurant.value?.tags.includes('联调模拟') ?? f
 const distance = computed(() => (restaurant.value ? campusDistance(restaurant.value) : null))
 const copyFeedback = ref<string | null>(null)
 const manualCopyText = ref('')
+// 回执确认后分别刷新点评和统计，保留整个详情组件与讨论面板。
+const reviewRevision = ref(0)
+const catalog = useRestaurantCatalog()
+const statisticsLoading = ref(false),
+  statisticsError = ref('')
+let statisticsController: globalThis.AbortController | undefined,
+  statisticsGeneration = 0
+
+/** 统计失败独立重试，不重新发布点评；同店组件保留，切店后拒绝晚到的旧统计。 */
+async function refreshStatistics(): Promise<void> {
+  const id = props.id,
+    ticket = ++statisticsGeneration
+  statisticsController?.abort()
+  statisticsController = new globalThis.AbortController()
+  const signal = statisticsController.signal
+  statisticsLoading.value = true
+  statisticsError.value = ''
+  try {
+    const fresh = await fetchRestaurant(id, signal)
+    if (ticket === statisticsGeneration && props.id === id) restaurant.value = fresh
+  } catch (reason) {
+    if (ticket !== statisticsGeneration || signal.aborted || props.id !== id) return
+    if (axios.isAxiosError(reason) && reason.response?.status === 404) {
+      void loadDetail()
+      return
+    }
+    statisticsError.value = '评分刷新失败，当前显示上次读取的数据。请重试刷新。'
+  } finally {
+    if (ticket === statisticsGeneration) statisticsLoading.value = false
+  }
+}
+function published() {
+  reviewRevision.value++
+  catalog.invalidate()
+  void refreshStatistics()
+}
 
 /** 路由复用和失败重试都独立读取；取消旧请求，避免旧店资料覆盖新页面。 */
 async function loadDetail(): Promise<void> {
+  statisticsGeneration++
+  statisticsController?.abort()
+  statisticsLoading.value = false
+  statisticsError.value = ''
   const requestGeneration = ++generation
   controller?.abort()
   controller = new globalThis.AbortController()
@@ -52,6 +92,8 @@ watch(
   { immediate: true },
 )
 onUnmounted(() => {
+  statisticsGeneration++
+  statisticsController?.abort()
   generation += 1
   controller?.abort()
 })
@@ -122,11 +164,6 @@ function shareRestaurant(): void {
           人均仅为估值，请以实际消费为准。
         </p>
       </div>
-      <div class="detail-cup">
-        <CupBadge :tier="tierOf(restaurant.score)" /><small>{{
-          restaurant.reviewCount ? '根据学生点评计算' : '等待真实的第一口'
-        }}</small>
-      </div>
     </section>
     <p class="detail-location">
       ⌖ {{ restaurant.address || '地址待补充'
@@ -140,7 +177,7 @@ function shareRestaurant(): void {
     <div class="detail-actions">
       <button type="button" @click="copyText(restaurant.address || restaurant.name)">
         复制地址</button
-      ><ReviewComposer :restaurant="restaurant" @published="loadDetail" />
+      ><ReviewComposer :restaurant="restaurant" @published="published" />
     </div>
     <div class="detail-layout">
       <div class="detail-main">
@@ -165,14 +202,32 @@ function shareRestaurant(): void {
               </dd>
             </div>
             <div>
-              <dt>学生点评</dt>
-              <dd>{{ restaurant.reviewCount }}<small> 条</small></dd>
+              <dt>评分人数</dt>
+              <dd>
+                {{ restaurant.participantCount
+                }}<small> 人 · {{ restaurant.reviewCount }} 条点评</small>
+              </dd>
             </div>
           </dl>
           <ScoreRadar :dimensions="restaurant.dimensions" />
-          <p class="panel-note">没有评价的店显示“待评级”，不等于低分。杯型会根据真实评价计算。</p>
+          <p v-if="statisticsLoading" class="panel-note" role="status">正在更新评分…</p>
+          <p v-if="statisticsError" class="panel-note" role="alert">
+            {{ statisticsError }} <button type="button" @click="refreshStatistics">重试刷新</button>
+          </p>
+          <p class="panel-note">
+            每位同学只取最新有效点评，历史点评保留但不重复计分。{{
+              restaurant.participantCount === 0
+                ? '暂无评分，欢迎分享你的体验。'
+                : '请结合评分人数和具体点评判断。'
+            }}
+          </p>
         </section>
-        <ReviewPanel :key="restaurant.id" :restaurant-id="restaurant.id" @changed="loadDetail" />
+        <ReviewPanel
+          :key="restaurant.id"
+          :restaurant-id="restaurant.id"
+          :revision="reviewRevision"
+          @changed="refreshStatistics"
+        />
       </div>
       <aside class="detail-aside" aria-label="餐厅基本信息">
         <section class="address-panel">
@@ -220,7 +275,6 @@ function shareRestaurant(): void {
     </div>
   </article>
   <section v-else class="missing-restaurant" aria-labelledby="missing-title">
-    <CupBadge tier="none" />
     <h1 id="missing-title">没有找到这家店。</h1>
     <p>餐厅可能已删除或链接有误，回去看看其他好味道吧。</p>
     <RouterLink class="primary-action" to="/">返回餐厅目录</RouterLink>
@@ -270,8 +324,7 @@ h1 {
   margin: 0 0 12px;
   overflow-wrap: anywhere;
 }
-.eyebrow,
-.detail-cup small {
+.eyebrow {
   display: none;
 }
 .detail-subtitle {
@@ -461,10 +514,6 @@ dd small {
   }
   h1 {
     font-size: 24px;
-  }
-  .detail-cup :deep(.cup-badge) {
-    font-size: 11px;
-    padding: 8px;
   }
   .detail-layout {
     display: flex;

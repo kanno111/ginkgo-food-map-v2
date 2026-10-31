@@ -33,7 +33,7 @@ async function choose() {
   const ticket = generation
   loading.value = true
   controller = new globalThis.AbortController()
-  const filters = { ...catalog.filters, tiers: [...catalog.filters.tiers] }
+  const filters = { ...catalog.filters }
   try {
     const all: RestaurantReadModel[] = []
     for (let page = 1; ; page++) {
@@ -88,7 +88,7 @@ onUnmounted(invalidate)
         <option :value="100">¥100以内</option>
       </select></label
     >
-    <p class="note">沿用当前搜索、分类及杯型条件，排除标注停业的店；不会自动放宽条件。</p>
+    <p class="note">沿用当前搜索、分类和经营状态条件，排除标注停业的店；不会自动放宽条件。</p>
     <p v-if="loading" role="status">正在从全站符合条件的餐厅中选择…</p>
     <p v-else-if="error" role="alert">{{ error }}</p>
     <template v-else-if="selected">
@@ -110,7 +110,7 @@ onUnmounted(invalidate)
           <strong>{{ priceLabel(selected) }}</strong>
           <p>
             {{ selected.reviewCount }} 条评价 ·
-            {{ selected.score === null ? '待评级' : `${selected.score.toFixed(1)}分` }}
+            {{ selected.score === null ? '暂无评分' : `${selected.score.toFixed(1)}分` }}
           </p>
         </div>
       </div>
@@ -132,33 +132,49 @@ onUnmounted(invalidate)
 .random-banner {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 22px 26px;
-  border-radius: 20px;
-  background: linear-gradient(115deg, #ffe39a, #efb835);
-  margin: 18px 0;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  border: 1px solid #f3e3c5;
+  border-radius: 12px;
+  background: #fff5e2;
 }
 .dice {
-  font-size: 54px;
-  color: #9a590c;
+  color: #c08b3f;
+  font-size: 32px;
+  line-height: 1;
 }
 h2 {
   margin: 0;
   font-size: 26px;
 }
+.random-banner h2 {
+  font-size: 16px;
+}
 .random-banner p {
-  margin: 7px 0 0;
-  font-size: 13px;
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #958164;
 }
 .random-banner button {
   margin-left: auto;
-  background: #282a2f;
-  color: white;
-  padding: 14px 20px;
-  border: 0;
-  border-radius: 28px;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid #ebcf9f;
+  border-radius: 9px;
+  background: #fffdf8;
+  color: #aa701c;
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
+}
+.random-banner button:hover {
+  background: #ffedcb;
+}
+.random-banner button:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 3px;
 }
 .random-dialog {
   width: min(620px, calc(100% - 24px));
@@ -254,21 +270,23 @@ h3 {
 }
 @media (max-width: 600px) {
   .random-banner {
-    padding: 18px 16px;
-    gap: 10px;
+    padding: 12px;
+    gap: 8px;
+    margin: 12px 0;
   }
   .dice {
-    font-size: 38px;
+    display: none;
   }
   .random-banner h2 {
-    font-size: 22px;
+    font-size: 15px;
   }
   .random-banner p {
-    font-size: 11px;
+    font-size: 10px;
   }
   .random-banner button {
-    font-size: 12px;
-    padding: 12px;
+    padding: 8px 12px;
+    min-height: 44px;
+    font-size: 11px;
   }
   .random-dialog {
     padding: 20px;

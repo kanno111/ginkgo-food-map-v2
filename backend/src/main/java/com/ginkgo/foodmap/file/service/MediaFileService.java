@@ -1,0 +1,45 @@
+package com.ginkgo.foodmap.file.service;
+
+import com.ginkgo.foodmap.common.exception.BusinessException;
+import com.ginkgo.foodmap.file.exception.FileErrorCode;
+import com.ginkgo.foodmap.file.mapper.MediaFileMapper;
+import com.ginkgo.foodmap.file.storage.OssStorageClient;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.List;
+
+/** 文件模块公开入口：负责媒体归属与状态，不访问点评表，不向其他模块暴露持久化实体。 */
+@Service
+@RequiredArgsConstructor
+public class MediaFileService {
+    private final MediaFileMapper files;
+    private final OssStorageClient storage;
+
+    /** 加入点评事务，固定ID升序加锁；展示顺序由review关联表保留。 */
+    @Transactional(propagation=Propagation.MANDATORY)
+    public void bind(List<Long> ids,long owner) {
+        for(long id:ids.stream().sorted().toList()) {
+            var row=files.lock(id);
+            if(row==null || row.getUploaderUserId()!=owner || files.bind(id,owner)!=1)
+                throw new BusinessException(FileErrorCode.NOT_BINDABLE);
+        }
+    }
+
+    /** 调用方先验证点评归属；和删评同事务登记清理，失败时关联与文件状态一起回滚。 */
+    @Transactional(propagation=Propagation.MANDATORY)
+    public void releaseBound(List<Long> ids, long owner) {
+        for (long id : ids.stream().sorted().toList()) {
+            if (files.releaseBound(id, owner) != 1)
+                throw new IllegalStateException("Missing bound review media");
+        }
+    }
+
+    /** 仅在调用方已验证点评可见性与关联后读取；不提供按文件ID公开HTTP访问。 */
+    public byte[] readBound(long id) {
+        var row=files.find(id);
+        if(row==null || !"BOUND".equals(row.getStatus())) throw new BusinessException(FileErrorCode.NOT_FOUND);
+        return storage.read(row.getBucketName(),row.getStorageKey());
+    }
+}

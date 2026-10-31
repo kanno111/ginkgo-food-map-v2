@@ -3,17 +3,17 @@ import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { toErrorMessage } from '@/shared/lib/toErrorMessage'
 import { fetchRestaurantCategories, fetchRestaurants } from '../api/restaurantApi'
 import type { RestaurantCategory } from '../api/restaurantApi'
-import type { CatalogFilters, CupTier, RestaurantReadModel } from './restaurant.types'
+import type { CatalogFilters, RestaurantReadModel } from './restaurant.types'
 
 /** 目录保留浏览条件和上一页结果；筛选、计数和分页统一由服务端执行。 */
 export const useRestaurantCatalog = defineStore('restaurant-catalog', () => {
   const filters = reactive<CatalogFilters>({
     keyword: '',
     category: '',
-    tiers: [],
-    view: 'all',
     sort: 'score',
     hideClosed: false,
+    maxPrice: null,
+    maxDistanceMeters: null,
   })
   const page = ref(1)
   const pageSize = 8
@@ -56,7 +56,7 @@ export const useRestaurantCatalog = defineStore('restaurant-catalog', () => {
     const signal = controller.signal
     loading.value = true
     error.value = null
-    const snapshot = { ...filters, tiers: [...filters.tiers] }
+    const snapshot = { ...filters }
     try {
       const [dictionary, result] = await Promise.all([
         categories.value.length
@@ -112,13 +112,6 @@ export const useRestaurantCatalog = defineStore('restaurant-catalog', () => {
   )
   onScopeDispose(cancelPending)
 
-  /** “全部”清空杯型组合；其他选项可以多选，待评级不等于小杯。 */
-  function toggleTier(tier: CupTier): void {
-    filters.tiers = filters.tiers.includes(tier)
-      ? filters.tiers.filter((value) => value !== tier)
-      : [...filters.tiers, tier]
-  }
-
   /** 重置条件；条件本就为空时也允许重新读取服务端新增的数据。 */
   function resetFilters(): void {
     const previous = JSON.stringify(filters)
@@ -126,10 +119,10 @@ export const useRestaurantCatalog = defineStore('restaurant-catalog', () => {
     Object.assign(filters, {
       keyword: '',
       category: '',
-      tiers: [],
-      view: 'all',
       sort: 'score',
       hideClosed: false,
+      maxPrice: null,
+      maxDistanceMeters: null,
     })
     page.value = 1
     if (previous === JSON.stringify(filters) && wasFirstPage) void load()
@@ -162,7 +155,6 @@ export const useRestaurantCatalog = defineStore('restaurant-catalog', () => {
     pageNumbers,
     load,
     cancelPending,
-    toggleTier,
     resetFilters,
     goToPage,
     invalidate,

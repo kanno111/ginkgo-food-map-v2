@@ -23,15 +23,10 @@ V2 是对旧版 Ginkgo 美食地图的渐进式重构。第一阶段采用模块
 
 ## 项目文档
 
-- [功能说明](docs/features.md)：使用非技术人员也能理解的语言说明当前可用和计划中的功能。
-- [需求与重构说明](docs/requirements.md)：基于原项目整理详细业务需求、权限与评分规则、验收标准、迁移计划和待确认事项。
-- [餐厅表结构与隔离测试](docs/architecture/restaurant-schema.md)：首批三张表、数据约束、索引及MySQL测试运行方式。
-- [按原站复刻的评价规划](docs/plans/reviews-development.md)：实际访问核对、功能对照、图片/回复/榜单完整链路及整站复刻清单，仅规划。
-- [评价表结构与迁移](docs/architecture/review-schema.md)：V4的5张表、登录账号归属、评分聚合、OSS文件登记及隔离结构测试；本地库已升级，接口待实现。
-- [接口文档](docs/api.md)：维护已实现接口的认证要求、请求参数、响应示例、错误码及联调方法。
-- [自动部署](docs/deployment.md)：develop 推送检查与发布、服务器结构、排查及回滚边界。
-- [开发记录](docs/development.md)：记录阶段性变更、关键决策和验证结果。
-- [后续开发记录](docs/development2.md)：认证功能、自动发布及需求梳理的后续记录。
+- [文档导航](docs/README.md)：按当前规则、设计、计划、运维和历史分类阅读。
+- [功能说明](docs/features.md)：当前能用什么、如何使用、哪些尚未接通。
+- [写点评后端计划](docs/plans/review-backend.md)：下一步拟议实现与验收，尚未开始编码。
+
 
 ## 目录
 
@@ -91,7 +86,7 @@ GET http://localhost:8080/api/public/status
 
 邮件健康检查会连接 SMTP、完成 TLS 和账号认证，但不发送邮件，不能据此认定验证码已经投递到收件箱。连接故障可能使 `/actuator/health` 变慢或返回503，而公开状态和餐厅查询仍可正常响应。
 
-本地配置示例通过 `mail.smtp.localhost` 显式指定 EHLO/HELO 客户端名称，避免 Java 自动获取本机规范主机名时等待反向 DNS。已有 `application-local.yml` 需要自行同步该非敏感属性；它不是远端 SMTP 地址，不应修改 `spring.mail.host`。本机 SMTP 认证已复测通过，历史 EOF 尚未复现；排查记录见[开发日志](docs/development2.md#2026-10-28smtp健康检查排查与本地dns延迟修正)。不要为消除告警关闭邮件健康检查，也不要用放宽证书校验或关闭 TLS 替代排查。
+本地配置示例通过 `mail.smtp.localhost` 显式指定 EHLO/HELO 客户端名称，避免 Java 自动获取本机规范主机名时等待反向 DNS。已有 `application-local.yml` 需要自行同步该非敏感属性；它不是远端 SMTP 地址，不应修改 `spring.mail.host`。本机 SMTP 认证已复测通过，历史 EOF 尚未复现；排查记录见[开发日志](docs/history/development-02.md#2026-10-28smtp健康检查排查与本地dns延迟修正)。不要为消除告警关闭邮件健康检查，也不要用放宽证书校验或关闭 TLS 替代排查。
 
 运行测试：
 

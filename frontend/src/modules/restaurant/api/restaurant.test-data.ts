@@ -20,6 +20,7 @@ export const responseFixture: RestaurantResponse = {
   score: null,
   recommendRate: null,
   reviewCount: 0,
+  participantCount: 0,
   dimensions: { taste: null, value: null, service: null, ambience: null },
 }
 
@@ -40,6 +41,7 @@ export const restaurantFixture: RestaurantReadModel = {
   score: null,
   recommendRate: null,
   reviewCount: 0,
+  participantCount: 0,
   dimensions: responseFixture.dimensions,
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CupBadge, cupTiers, ratingDimensions } from '@/modules/restaurant'
+import { ratingDimensions } from '@/modules/restaurant'
 import cover from '@/shared/assets/ginkgo-cover.jpg'
 </script>
 
@@ -8,7 +8,7 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
     <RouterLink class="guide-back" to="/">← 返回餐厅目录</RouterLink>
     <header class="guide-heading">
       <h1 id="guide-title">评分说明</h1>
-      <p>吃了就打分，按杯型论英雄——不好吃就举牌子。</p>
+      <p>记录真实用餐体验，评分请结合参与人数和具体点评参考。</p>
     </header>
     <section class="dimension-guide" aria-label="四维评分">
       <div v-for="(dimension, index) in ratingDimensions" :key="dimension.key">
@@ -17,29 +17,19 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
         <p>{{ dimension.description }}</p>
       </div>
     </section>
-    <section class="tier-guide" aria-labelledby="tiers-title">
-      <h2 id="tiers-title">杯型与评分</h2>
-      <p>每项 0–10 分，步进 0.5。杯型由真实评价的综合分计算。</p>
-      <div class="guide-table">
-        <div v-for="tier in cupTiers" :key="tier.key" class="tier-row">
-          <CupBadge :tier="tier.key" /><span v-if="tier.key === 'bucket'">8.6 ≤ 分数 ≤ 10</span
-          ><span v-else-if="tier.key === 'super'">7.4 ≤ 分数 &lt; 8.6</span
-          ><span v-else-if="tier.key === 'large'">6.2 ≤ 分数 &lt; 7.4</span
-          ><span v-else-if="tier.key === 'medium'">5.0 ≤ 分数 &lt; 6.2</span
-          ><span v-else-if="tier.key === 'small'">0 ≤ 分数 &lt; 5.0</span
-          ><span v-else>没有有效评价</span><span>{{ tier.description }}</span>
-        </div>
-      </div>
-    </section>
     <section class="calculation-guide" aria-labelledby="calculation-title">
-      <h2 id="calculation-title">杯型怎么算出来？</h2>
+      <h2 id="calculation-title">评分怎么算出来？</h2>
       <ol>
         <li>单条评价总分 = 四项评分的平均值，四舍五入保留两位小数。</li>
-        <li>餐厅综合分 = 全部有效评价总分的平均值，展示时保留一位小数。</li>
-        <li>杯型使用尚未四舍五入的餐厅综合分判断：8.55 即使显示为 8.6，仍是超大杯。</li>
-        <li>推荐率单独计算，等于推荐评价数除以有效评价总数，与杯型是不同指标。</li>
+        <li>
+          每个账号对同一家店只取最新有效点评。餐厅综合分为这些点评总分的平均值，展示一位小数。
+        </li>
+        <li>四维分别对每位同学最新有效点评中的对应维度求平均，历史点评不重复计分。</li>
+        <li>推荐率单独计算，等于最新有效点评中推荐人数除以评分人数，与综合分独立。</li>
       </ol>
-      <p>0 分是有效评分；没有评价则是“待评级”。只有一条评价的高分，也请结合评价数量和正文判断。</p>
+      <p>
+        0 分是有效评分；没有评价则显示“暂无评分”。只有一条评价的高分，也请结合评分人数和正文判断。
+      </p>
     </section>
     <section class="community-note">
       <!-- 与原版帮助页共用封面和社团说明，避免另造品牌口号。 -->
@@ -114,40 +104,6 @@ h2 {
   font-size: 12px;
   line-height: 1.9;
 }
-.tier-guide {
-  margin-top: 50px;
-}
-.tier-guide > h2,
-.calculation-guide h2 {
-  font-family: Georgia, 'Songti SC', serif;
-  font-size: 28px;
-}
-.tier-guide > p {
-  color: #8c7b60;
-  font-size: 13px;
-  line-height: 1.8;
-}
-.guide-table {
-  margin-top: 24px;
-  border: 1px solid #e1d7c5;
-  border-radius: 16px;
-  overflow: hidden;
-}
-.tier-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 20px;
-  align-items: center;
-  padding: 15px 24px;
-  border-bottom: 1px solid #e7decc;
-}
-.tier-row:last-child {
-  border-bottom: 0;
-}
-.tier-row > span:not(.cup-badge) {
-  color: #8a7a60;
-  font-size: 12px;
-}
 .calculation-guide {
   padding: 28px;
   margin-top: 38px;
@@ -195,15 +151,6 @@ li,
   }
   .dimension-guide > div {
     padding: 20px;
-  }
-  .tier-row {
-    grid-template-columns: 1fr 1fr;
-    gap: 9px;
-    padding: 14px 18px;
-  }
-  .tier-row > span:last-child {
-    grid-column: 1 / -1;
-    padding-left: 6px;
   }
 }
 </style>

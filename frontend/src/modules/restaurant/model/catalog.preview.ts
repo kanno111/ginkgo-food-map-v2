@@ -301,6 +301,7 @@ export const previewRestaurants: RestaurantReadModel[] = legacyCandidates.map((c
   priceKind: 'estimate',
   score: null,
   reviewCount: 0,
+  participantCount: 0,
   recommendRate: null,
   dimensions: { taste: null, value: null, service: null, ambience: null },
   source: 'legacy-preview',

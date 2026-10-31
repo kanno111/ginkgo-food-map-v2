@@ -1,5 +1,7 @@
 package com.ginkgo.foodmap.restaurant.service;
 
+import com.ginkgo.foodmap.restaurant.support.RestaurantIdentifiers;
+
 import com.ginkgo.foodmap.common.exception.BusinessException;
 import com.ginkgo.foodmap.restaurant.dto.RestaurantListQuery;
 import com.ginkgo.foodmap.restaurant.entity.RestaurantEntity;
@@ -19,7 +21,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 公开餐厅读取应用服务，不访问其他模块的表或 Mapper，不推测尚未存在的评价。
+ * 公开餐厅读取应用服务，只读取本模块的餐厅、字典、标签及评价统计读模型。
  * MySQL REPEATABLE_READ只读事务保证COUNT、记录与标签来自同一快照，避免并发修改导致口径漂移。
  */
 @Service
@@ -27,6 +29,11 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class RestaurantReadService {
     private final RestaurantCatalogMapper mapper;
+
+    /** 面向其他模块的只读可见性校验，不初始化统计、不取得写锁。 */
+    public void requireVisible(long id) {
+        if(mapper.selectVisibleById(id)==null)throw new BusinessException(RestaurantErrorCode.NOT_FOUND);
+    }
 
     /** 返回受控分类全集及启用状态，历史分类不会因停用而消失。 */
     public List<RestaurantCategoryVo> categories() {
@@ -69,7 +76,7 @@ public class RestaurantReadService {
                         Collectors.mapping(RestaurantTagEntity::getTag, Collectors.toList())));
     }
 
-    /** 显式映射输出白名单；评分空态由VO默认值表达，不写入可手工修改的统计列。 */
+    /** 显式映射公开白名单；直接使用同一数据库快照中的统计，不按点评当前页另算均分。 */
     static RestaurantVo toVo(RestaurantEntity row, List<String> tags) {
         RestaurantVo vo = new RestaurantVo();
         vo.setId(row.getId().toString());
@@ -89,6 +96,17 @@ public class RestaurantReadService {
         vo.setUpdatedAt(row.getUpdatedAt());
         vo.setDistanceKm(row.getDistanceKm());
         vo.setTags(tags);
+        vo.setScore(row.getScore());
+        vo.setRecommendRate(row.getRecommendRate());
+        vo.setReviewCount(row.getReviewCount());
+        vo.setParticipantCount(row.getParticipantCount());
+        vo.setTier(row.getTier() == null ? "none" : row.getTier());
+        var dimensions = new RestaurantVo.Dimensions();
+        dimensions.setTaste(row.getTaste());
+        dimensions.setValue(row.getValue());
+        dimensions.setService(row.getService());
+        dimensions.setAmbience(row.getAmbience());
+        vo.setDimensions(dimensions);
         return vo;
     }
 }

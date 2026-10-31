@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -100,6 +101,7 @@ class RestaurantReadApiIntegrationTest {
     @AfterEach
     void clearFixtures() {
         reset(mapper);
+        jdbc.update("DELETE FROM restaurant_review_statistics");
         jdbc.update("DELETE FROM restaurant_tags");
         jdbc.update("DELETE FROM restaurants");
     }
@@ -262,6 +264,7 @@ class RestaurantReadApiIntegrationTest {
             assertThat(data.get("dimensions").get(field).isNull()).isTrue();
         }
         assertThat(data.get("reviewCount").asLong()).isZero();
+        assertThat(data.get("participantCount").asLong()).isZero();
         assertThat(data.get("tier").asString()).isEqualTo("none");
         for (String field : new String[]{"createdBy", "updatedBy", "deletedBy", "deletedAt", "rowVersion", "deleteReasonCode"}) {
             assertThat(data.has(field)).as(field).isFalse();
@@ -321,6 +324,220 @@ class RestaurantReadApiIntegrationTest {
         mvc.perform(get("/api/restaurants")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(6))
                 .andExpect(jsonPath("$.data.records[0].id").value("102"));
+    }
+
+    /** 统计来源同属restaurant模块，目录和详情必须返回同一组人数、历史条数和独立推荐率。 */
+    @Test
+    void shouldExposeIdenticalStatisticsInListAndDetailWithoutWrites() throws Exception {
+        statistics(101, 3, 2, 1, "15", "16", "15", "12", "17");
+        var detail = mvc.perform(get("/api/restaurants/101")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.reviewCount").value(3))
+                .andExpect(jsonPath("$.data.participantCount").value(2))
+                .andExpect(jsonPath("$.data.score").value(7.5))
+                .andExpect(jsonPath("$.data.recommendRate").value(0.5))
+                .andExpect(jsonPath("$.data.tier").value("super"))
+                .andExpect(jsonPath("$.data.dimensions.taste").value(8))
+                .andExpect(jsonPath("$.data.dimensions.value").value(7.5))
+                .andExpect(jsonPath("$.data.dimensions.service").value(6))
+                .andExpect(jsonPath("$.data.dimensions.ambience").value(8.5)).andReturn();
+        var list = mvc.perform(get("/api/restaurants").param("pageSize", "1"))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json.readTree(list.getResponse().getContentAsString()).get("data").get("records").get(0))
+                .isEqualTo(json.readTree(detail.getResponse().getContentAsString()).get("data"));
+        // 读取缺失统计行及显式零行都不写数据库；只有首次发评才按既有流程惰性初始化。
+        statistics(102, 0, 0, 0, "0", "0", "0", "0", "0");
+        for (long id : new long[]{102, 103}) {
+            mvc.perform(get("/api/restaurants/" + id)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.participantCount").value(0))
+                    .andExpect(jsonPath("$.data.tier").value("none"))
+                    .andExpect(jsonPath("$.data.score").isEmpty());
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM restaurant_review_statistics", Long.class)).isEqualTo(2);
+        verifyNoInteractions(sessions);
+    }
+
+    /** 所有真实评分维度与总条数先在完整集合排序，再分页；同分仍按名称和ID稳定返回。 */
+    @ParameterizedTest
+    @ValueSource(strings = {"score", "taste", "value", "service", "ambience", "reviews"})
+    void shouldSortRealStatisticsGloballyBeforePaging(String sort) throws Exception {
+        statistics(101, 1, 1, 1, "7", "7", "7", "7", "7");
+        statistics(102, 1, 1, 0, "7", "7", "7", "7", "7");
+        statistics(105, 5, 2, 0, "18", "18", "18", "18", "18");
+        for (int page = 1; page <= 3; page++) {
+            String expected = new String[]{"105", "101", "102"}[page - 1];
+            mvc.perform(get("/api/restaurants").param("sort", sort).param("pageSize", "1")
+                            .param("page", Integer.toString(page)))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.records[0].id").value(expected));
+        }
+    }
+
+    /** 所有杯型临界点比较精确累计值，展示成8.6的8.599仍属超大杯。 */
+    @ParameterizedTest
+    @CsvSource({"8599,super", "8600,bucket", "7399,large", "7400,super", "6199,medium",
+            "6200,large", "4999,small", "5000,medium", "0,small", "10000,bucket"})
+    void shouldClassifyBeforeRoundingAndFilterUsingTheSameTier(String sum, String tier) throws Exception {
+        statistics(101, 1000, 1000, 0, sum, sum, sum, sum, sum);
+        mvc.perform(get("/api/restaurants/101")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tier").value(tier));
+        mvc.perform(get("/api/restaurants").param("tiers", tier).param("pageSize", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value("101"));
+        mvc.perform(get("/api/restaurants").param("tiers", "none"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(6));
+    }
+
+    /** 真实0分先于未知分；视图按杯型而非推荐率，组合筛选和总数使用相同口径。 */
+    @Test
+    void shouldDistinguishZeroUnknownAndIndependentRecommendationChoice() throws Exception {
+        statistics(105, 1, 1, 1, "0", "0", "0", "0", "0");
+        statistics(104, 1, 1, 0, "6.25", "6.5", "6.5", "6", "6");
+        mvc.perform(get("/api/restaurants/105")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.score").value(0))
+                .andExpect(jsonPath("$.data.recommendRate").value(1))
+                .andExpect(jsonPath("$.data.tier").value("small"));
+        mvc.perform(get("/api/restaurants").param("pageSize", "1").param("page", "2"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.records[0].id").value("105"));
+        mvc.perform(get("/api/restaurants").param("view", "recommended").param("tiers", "large", "none"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value("104"));
+        mvc.perform(get("/api/restaurants").param("view", "pitfall").param("tiers", "small", "none"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value("105"));
+        mvc.perform(get("/api/restaurants").param("view", "recommended").param("tiers", "small"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+    }
+
+    /** 接近INT UNSIGNED人数上限仍保留除法差异，不因MySQL默认除法精度而错序或跨杯型。 */
+    @Test
+    void shouldPreserveSubMicroScoreDifferences() throws Exception {
+        statistics(101, 4_000_000_000L, 4_000_000_000L, 0, "34399999999.99", "0", "0", "0", "0");
+        statistics(102, 4_000_000_000L, 4_000_000_000L, 0, "34400000000", "0", "0", "0", "0");
+        mvc.perform(get("/api/restaurants").param("pageSize", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.records[0].id").value("102"));
+        mvc.perform(get("/api/restaurants/101")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tier").value("super"));
+        mvc.perform(get("/api/restaurants").param("tiers", "bucket"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1));
+    }
+
+    /** COUNT后并发发布改变人数和杯型，本次响应仍保持同一只读快照，下次请求才看到新值。 */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void shouldReadStatisticsAndFilterWithinOneSnapshot() throws Exception {
+        statistics(101, 1, 1, 1, "8", "8", "8", "8", "8");
+        var changed = new AtomicBoolean();
+        doAnswer(call -> {
+            long total = sqlSession.selectOne(RestaurantCatalogMapper.class.getName() + ".countVisible",
+                    Map.of("query", call.getArgument(0)));
+            if (changed.compareAndSet(false, true)) {
+                try (Connection writer = connect(database); Statement statement = writer.createStatement()) {
+                    statement.executeUpdate("UPDATE restaurant_review_statistics SET review_count=2, participant_count=2, "
+                            + "overall_score_sum=9, taste_sum=9, value_sum=9, service_sum=9, ambience_sum=9 WHERE restaurant_id=101");
+                }
+            }
+            return total;
+        }).when(mapper).countVisible(any(RestaurantListQuery.class));
+        mvc.perform(get("/api/restaurants").param("view", "recommended"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].score").value(8))
+                .andExpect(jsonPath("$.data.records[0].participantCount").value(1));
+        mvc.perform(get("/api/restaurants").param("view", "recommended"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(get("/api/restaurants/101")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.score").value(4.5));
+    }
+
+    /** 金额条件包含30元边界，未知价格仅在开启上限时排除，默认目录不丢失未知值。 */
+    @Test
+    void shouldFilterMaximumPriceWithInclusiveBoundary() throws Exception {
+        advancedFixtures();
+        assertAdvanced("30", null, null, false, "201", "204", "206");
+        assertAdvanced("29.99", null, null, false, "204", "206");
+        assertAdvanced(null, null, null, false, "201", "202", "203", "204", "205", "206");
+    }
+
+    /** SQL使用米制未舍入Haversine；范围外、位置缺失均不命中，阈值附近不能因显示舍入误入。 */
+    @Test
+    void shouldFilterMaximumDistanceAndExcludeUnlocatedRestaurants() throws Exception {
+        advancedFixtures();
+        assertAdvanced(null, "1000", null, false, "201", "202", "205");
+        mvc.perform(get("/api/restaurants").param("keyword", "高级").param("maxDistanceMeters", "1000"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.records[1].distanceKm").value(org.hamcrest.Matchers.lessThanOrEqualTo(1.0)));
+        // 纬度保留6位小数后约999米和1001米；计算误差远小于1米。
+        insert(207, "高级G边界内", "OTHER", 30, "EXACT", null,
+                30.7544 + Math.toDegrees(999.0 / 6371000), 103.9312, "OPERATING");
+        insert(208, "高级H边界外", "OTHER", 30, "EXACT", null,
+                30.7544 + Math.toDegrees(1001.0 / 6371000), 103.9312, "OPERATING");
+        assertAdvanced(null, "1000", null, false, "201", "202", "205", "207");
+    }
+
+    /** 分类、金额、直线距离及经营状态按交集过滤，停业开关不改变其他条件语义。 */
+    @Test
+    void shouldCombineAdvancedFiltersWithCategoryAndClosedMarker() throws Exception {
+        advancedFixtures();
+        assertAdvanced("50", null, "HOT_POT", false, "201", "202", "203", "206");
+        assertAdvanced(null, "2000", "HOT_POT", true, "201", "202", "205");
+        assertAdvanced("30", "1000", null, false, "201");
+        assertAdvanced("20", "500", "HOT_POT", true);
+    }
+
+    /** 全局筛选再按真实分数排序和分页；COUNT与每页集合一致，不能先取一页再丢弃不符餐厅。 */
+    @Test
+    void shouldCountAndSortAdvancedResultsBeforeLimit() throws Exception {
+        advancedFixtures();
+        statistics(201, 1, 1, 0, "6", "6", "6", "6", "6");
+        statistics(202, 1, 1, 0, "8", "8", "8", "8", "8");
+        statistics(203, 1, 1, 0, "9", "9", "9", "9", "9");
+        for (int page = 1; page <= 3; page++) {
+            mvc.perform(get("/api/restaurants").param("keyword", "高级").param("maxPrice", "50")
+                            .param("maxDistanceMeters", "2000").param("sort", "score")
+                            .param("pageSize", "1").param("page", Integer.toString(page)))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(3))
+                    .andExpect(jsonPath("$.data.totalPages").value(3))
+                    .andExpect(jsonPath("$.data.records.length()").value(1))
+                    .andExpect(jsonPath("$.data.records[0].id").value(Integer.toString(204 - page)));
+        }
+    }
+
+    /** 新增查询参数也必须经过绑定和校验；不能忽略非法值后意外放宽结果。 */
+    @ParameterizedTest
+    @CsvSource({"maxPrice,0", "maxPrice,-1", "maxPrice,30.001", "maxPrice,NaN", "maxPrice,100000000",
+            "maxDistanceMeters,0", "maxDistanceMeters,-1", "maxDistanceMeters,1.5",
+            "maxDistanceMeters,NaN", "maxDistanceMeters,20040001"})
+    void shouldRejectInvalidAdvancedFilterValues(String parameter, String value) throws Exception {
+        mvc.perform(get("/api/restaurants").param(parameter, value))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("COMMON_VALIDATION_FAILED"));
+    }
+
+    /** 夹具仅存在于本测试创建的独立库，包含临界价格、近/远位置、停业及两种未知值。 */
+    private void advancedFixtures() {
+        insert(201, "高级A三十元", "HOT_POT", 30, "EXACT", null, 30.7544, 103.9312, "OPERATING");
+        insert(202, "高级B三十一元", "HOT_POT", 31, "ESTIMATE", null, 30.7624, 103.9312, "OPERATING");
+        insert(203, "高级C五十元停业", "HOT_POT", 50, "EXACT", null, 30.7694, 103.9312, "CLOSED");
+        insert(204, "高级D远处二十元", "OTHER", 20, "EXACT", null, 30.7794, 103.9312, "OPERATING");
+        insert(205, "高级E未知人均", "HOT_POT", null, "UNKNOWN", null, 30.7584, 103.9312, "OPERATING");
+        insert(206, "高级F待补位置", "HOT_POT", 20, "EXACT", null, null, null, "OPERATING");
+    }
+
+    private void assertAdvanced(String price, String meters, String category, boolean hideClosed, String... ids) throws Exception {
+        var request = get("/api/restaurants").param("keyword", "高级").param("hideClosed", Boolean.toString(hideClosed));
+        if (price != null) request.param("maxPrice", price);
+        if (meters != null) request.param("maxDistanceMeters", meters);
+        if (category != null) request.param("category", category);
+        var result = mvc.perform(request).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(ids.length))
+                .andExpect(jsonPath("$.data.records.length()").value(ids.length));
+        for (int index = 0; index < ids.length; index++) {
+            result.andExpect(jsonPath("$.data.records[" + index + "].id").value(ids[index]));
+        }
+    }
+
+    /** 人工构造统计读模型验证查询边界，真实发布到统计再到公开读取由review写入集成测试覆盖。 */
+    private void statistics(long id, long reviews, long participants, long recommended, String overall,
+                            String taste, String value, String service, String ambience) {
+        jdbc.update("INSERT INTO restaurant_review_statistics(restaurant_id,review_count,participant_count,recommend_count,"
+                        + "overall_score_sum,taste_sum,value_sum,service_sum,ambience_sum) VALUES(?,?,?,?,?,?,?,?,?)",
+                id, reviews, participants, recommended, overall, taste, value, service, ambience);
     }
 
     private void insert(long id, String name, String category, Integer price, String kind, String address,

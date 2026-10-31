@@ -1,6 +1,8 @@
 package com.ginkgo.foodmap.restaurant.dto;
 
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -8,6 +10,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.ArrayList;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -42,6 +45,16 @@ public class RestaurantListQuery {
     @NotNull
     private Boolean hideClosed = false;
 
+    /** 人均上限含边界，空值表示不限；未知价格由SQL排除，精度沿用金额字段。 */
+    @DecimalMin(value = "0.01", message = "人均上限必须大于0")
+    @Digits(integer = 8, fraction = 2, message = "人均上限最多8位整数和2位小数")
+    private BigDecimal maxPrice;
+
+    /** 距校区参考点的球面直线距离，单位米；空值不限，不依赖浏览器定位。 */
+    @Min(value = 1, message = "距离上限至少1米")
+    @Max(value = 20040000, message = "距离上限超出球面距离范围")
+    private Integer maxDistanceMeters;
+
     @NotNull
     @Min(value = 1, message = "页码必须大于0")
     private Integer page = 1;
@@ -62,8 +75,4 @@ public class RestaurantListQuery {
                 .replace("_", "!_") + "%";
     }
 
-    /** M1 没有评价：推荐、踩雷及不含待评级的杯型组合均为空，不能伪造评分。 */
-    public boolean isExcludesUnrated() {
-        return !"all".equals(view) || (!tiers.isEmpty() && !tiers.contains("none"));
-    }
 }

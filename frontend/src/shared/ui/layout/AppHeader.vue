@@ -14,7 +14,7 @@ defineEmits<{ logout: []; retry: [] }>()
 <template>
   <header class="topbar">
     <RouterLink class="brand" to="/" aria-label="返回首页">
-      <!-- 原版页头杯型的精确路径；共享布局不依赖业务模块。 -->
+      <!-- 原版页头杯子图标的精确路径；共享布局不依赖业务模块。 -->
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="19" height="19" focusable="false">
           <path

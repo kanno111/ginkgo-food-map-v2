@@ -111,7 +111,7 @@ MyBatis-Plus不会因为存在 `deleted_at` 字段就自动过滤。当前读取
 
 首期未实现评价，所有餐厅的API阅读结果固定表达为：评价数0、综合分NULL、四维均分NULL、推荐率NULL，前端根据空评分显示待评级。不在数据库存一套可手工填写的杯型；推荐和踩雷筛选结果为空，不能将无评价餐厅补成推荐店。
 
-评价阶段的结构与迁移见[评价表结构方案](review-schema.md)：reviews、照片关联及回复归review模块；可重建的restaurant_review_statistics归restaurant模块。通过公开应用服务在同一事务同步，餐厅自身表与统计表在分页前完成全局筛选排序，不能先取一页再拼评分。最新评审已撤回新增创建昵称字段，使用登录账号署名，不修改既有created_by归属或V3迁移；已新增V4迁移与隔离结构测试，评价业务接口和评分同步尚未实现。
+评价阶段的结构与迁移见[评价表结构方案](review-schema.md)：reviews、照片关联及回复归review模块；可重建的restaurant_review_statistics归restaurant模块。通过公开应用服务在同一事务同步，餐厅自身表与统计表在分页前完成全局筛选排序，不能先取一页再拼评分。最新评审已撤回新增创建昵称字段，使用登录账号署名，不修改既有created_by归属或V3迁移；V4/V5及隔离结构测试已完成，文本发布与事务计分已实现；目录评分读取、分组及前端联动仍待接通。
 
 地图阶段继续使用GCJ-02；当前经纬度不声明为WGS84，也不直接标为SRID 4326。范围查询、地点ID、城市筛选和地图索引在地图接口确定后新增迁移。历史真实餐厅的ID映射、导入批次及原始时间在迁移阶段独立设计。
 
@@ -153,7 +153,7 @@ mvn --batch-mode --no-transfer-progress verify '-Drestaurant.integration=true'
 
 [RestaurantWriteApiIntegrationTest](../../backend/src/test/java/com/ginkgo/foodmap/restaurant/RestaurantWriteApiIntegrationTest.java)使用同一开关和环境变量、另建专用随机库，验证当前账号/实时角色、CRUD闭环、Unicode边界、价格/坐标、事务回滚、旧页面后保存覆盖及并发完整标签集。写入测试不使用外层回滚事务，实际HTTP保存独立提交，失败回滚由业务事务完成；测试结束只清理本次随机库。
 
-CI在原有MySQL 8.4临时服务中启用该开关，同时保留真实认证与Redis测试。实际本地执行结果及跳过范围见[开发日志](../development2.md)；未推送或未运行的完整CI不能记为通过。
+CI在原有MySQL 8.4临时服务中启用该开关，同时保留真实认证与Redis测试。实际本地执行结果及跳过范围见[开发日志](../history/development-02.md)；未推送或未运行的完整CI不能记为通过。
 
 ### 8.2 本地联调模拟数据
 

@@ -10,7 +10,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
 /**
- * 仅查询 restaurant 模块自己的三张表，全部 SQL 位于同名 XML。
+ * 仅查询restaurant模块自己的餐厅、分类、标签和统计表，全部SQL位于同名XML。
  * 不继承通用 CRUD Mapper，防止调用默认 selectById 绕过 deleted_at 显式过滤。
  */
 @Mapper
