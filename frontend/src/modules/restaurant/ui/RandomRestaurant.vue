@@ -33,7 +33,7 @@ async function choose() {
   const ticket = generation
   loading.value = true
   controller = new globalThis.AbortController()
-  const filters = { ...catalog.filters, tiers: [...catalog.filters.tiers] }
+  const filters = { ...catalog.filters }
   try {
     const all: RestaurantReadModel[] = []
     for (let page = 1; ; page++) {
@@ -88,7 +88,7 @@ onUnmounted(invalidate)
         <option :value="100">¥100以内</option>
       </select></label
     >
-    <p class="note">沿用当前搜索、分类及杯型条件，排除标注停业的店；不会自动放宽条件。</p>
+    <p class="note">沿用当前搜索、分类和经营状态条件，排除标注停业的店；不会自动放宽条件。</p>
     <p v-if="loading" role="status">正在从全站符合条件的餐厅中选择…</p>
     <p v-else-if="error" role="alert">{{ error }}</p>
     <template v-else-if="selected">
@@ -110,7 +110,7 @@ onUnmounted(invalidate)
           <strong>{{ priceLabel(selected) }}</strong>
           <p>
             {{ selected.reviewCount }} 条评价 ·
-            {{ selected.score === null ? '待评级' : `${selected.score.toFixed(1)}分` }}
+            {{ selected.score === null ? '暂无评分' : `${selected.score.toFixed(1)}分` }}
           </p>
         </div>
       </div>

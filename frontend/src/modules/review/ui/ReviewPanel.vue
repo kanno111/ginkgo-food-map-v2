@@ -33,6 +33,10 @@ const page = ref(1),
   totalReviews = ref(0)
 let requestedPage = 1
 const currentOnly = ref(false)
+const viewerId = computed(() =>
+  auth.authenticated && auth.user ? String(auth.user.id) : undefined,
+)
+const deleteError = ref('')
 // 仅按明确的计分状态筛选；未知状态不自行猜测成历史或当前评分。
 const visibleRecords = computed(() =>
   records.value.filter((item) => !currentOnly.value || item.scoringStatus === 'current'),
@@ -71,6 +75,7 @@ async function load(targetPage = page.value) {
 watch(
   () => [props.restaurantId, props.revision],
   () => {
+    cancelDelete()
     page.value = 1
     totalPages.value = totalGroups.value = totalReviews.value = 0
     void load(1)
@@ -125,16 +130,21 @@ async function reply(item: ReviewItem) {
   }
 }
 function askDelete(item: ReviewItem) {
+  if (!props.preview && (!viewerId.value || item.authorId !== viewerId.value)) return
+  deleteError.value = ''
   deleting.value = item
   confirm.value?.showModal()
 }
 function cancelDelete() {
   confirm.value?.close?.()
   deleting.value = null
+  deleteError.value = ''
 }
 async function remove() {
   if (!deleting.value || busy.value) return
+  if (!props.preview && (!viewerId.value || deleting.value.authorId !== viewerId.value)) return
   busy.value = true
+  deleteError.value = ''
   const ticket = generation,
     owner = authToken.value
   try {
@@ -142,12 +152,13 @@ async function remove() {
     if (ticket === generation && owner === authToken.value) {
       confirm.value?.close?.()
       deleting.value = null
-      await load()
+      // 归组及代表可能移动，回第一页避免删掉末页最后一组后停在空页。
+      await load(1)
       emit('changed')
     }
   } catch (reason) {
     if (ticket === generation && owner === authToken.value)
-      error.value = reason instanceof Error ? reason.message : '删除失败。'
+      deleteError.value = reason instanceof Error ? reason.message : '删除失败，可重试。'
   } finally {
     busy.value = false
   }
@@ -200,6 +211,7 @@ function view(url: string) {
       :item="item"
       :preview="preview"
       :authenticated="auth.authenticated"
+      :viewer-id="viewerId"
       :busy="busy"
       :reply-texts="texts"
       :show-history="!currentOnly"
@@ -210,7 +222,14 @@ function view(url: string) {
       @text="(id, text) => (texts[id] = text)"
     >
       <template v-if="!preview && gateway.history && item.historyCount" #history>
-        <ReviewHistory :restaurant-id="restaurantId" :item="item" @photo="view" @refresh="load()" />
+        <ReviewHistory
+          :restaurant-id="restaurantId"
+          :item="item"
+          :viewer-id="viewerId"
+          @photo="view"
+          @refresh="load()"
+          @delete="askDelete"
+        />
       </template>
     </ReviewEntry>
     <nav
@@ -224,16 +243,24 @@ function view(url: string) {
         下一页点评
       </button>
     </nav>
-    <dialog ref="confirm">
-      <h3>确定删除这条评价？</h3>
-      <p>回复和照片将一并删除，删除后无法恢复。</p>
-      <p v-if="deleting?.scoringStatus === 'current'">
-        删除后，你在这家店的上一条有效点评会重新参与评分；没有历史点评时移除你的评分。
-      </p>
-      <p v-if="preview">当前仅演示页面变化，不会删除真实数据，可通过“重置示例”恢复。</p>
-      <button type="button" @click="cancelDelete">取消</button
-      ><button type="button" :disabled="busy" @click="remove">确认删除</button>
-    </dialog>
+    <Teleport to="body">
+      <dialog
+        ref="confirm"
+        aria-labelledby="delete-review-title"
+        @cancel.prevent="cancelDelete"
+        @close="deleting = null"
+      >
+        <h3 id="delete-review-title">确定删除这条评价？</h3>
+        <p>回复和照片将一并删除，删除后无法恢复。</p>
+        <p v-if="deleting?.scoringStatus === 'current'">
+          删除后，你在这家店的上一条有效点评会重新参与评分；没有历史点评时移除你的评分。
+        </p>
+        <p v-if="preview">当前仅演示页面变化，不会删除真实数据，可通过“重置示例”恢复。</p>
+        <p v-if="deleteError" role="alert">{{ deleteError }}</p>
+        <button type="button" autofocus @click="cancelDelete">取消</button
+        ><button type="button" :disabled="busy" @click="remove">确认删除</button>
+      </dialog>
+    </Teleport>
     <dialog ref="lightbox" class="lightbox">
       <button type="button" aria-label="关闭大图" @click="lightbox?.close()">关闭 ×</button
       ><img :src="photo || undefined" alt="评价照片大图" />

@@ -13,6 +13,8 @@ export interface RestaurantReadModel {
   priceKind: 'estimate' | 'exact' | 'unknown'
   score: number | null
   reviewCount: number
+  /** 每账号每店只取最新有效点评，人数不随历史条数增长。 */
+  participantCount: number
   recommendRate: number | null
   dimensions: Record<RatingDimension, number | null>
   source: 'USER' | 'LEGACY_IMPORT' | 'legacy-preview'
@@ -21,16 +23,15 @@ export interface RestaurantReadModel {
 }
 
 export type RatingDimension = 'taste' | 'value' | 'service' | 'ambience'
-export type CupTier = 'bucket' | 'super' | 'large' | 'medium' | 'small' | 'none'
 export type RestaurantSort = 'score' | RatingDimension | 'reviews' | 'price' | 'distance'
-export type RestaurantView = 'all' | 'recommended' | 'pitfall'
 
 /** 分类使用服务端稳定编码，所有条件随分页请求提交，不在当前页二次筛选。 */
 export interface CatalogFilters {
   keyword: string
   category: string
-  tiers: CupTier[]
-  view: RestaurantView
   sort: RestaurantSort
   hideClosed: boolean
+  /** 人均上限（元）及距校区直线距离上限（米）；null表示不限，交由服务端分页前筛选。 */
+  maxPrice: number | null
+  maxDistanceMeters: number | null
 }

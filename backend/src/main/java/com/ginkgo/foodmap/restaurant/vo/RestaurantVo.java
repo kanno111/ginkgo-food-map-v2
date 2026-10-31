@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * 列表与详情共用的公开餐厅字段白名单，不携带账号ID、删除元数据或行版本。
- * ID 使用字符串避免浏览器整数精度损失；M1 没有评价，所有分数与推荐率为 null。
+ * ID使用字符串避免浏览器整数精度损失；无人计分时分数与推荐率为null，不能补成0。
  */
 @Data
 public class RestaurantVo {
@@ -32,6 +32,8 @@ public class RestaurantVo {
     private BigDecimal score;
     private BigDecimal recommendRate;
     private long reviewCount;
+    /** 有效计分账号数；同人历史点评不增加该人数，也不重复贡献分数。 */
+    private long participantCount;
     private String tier = "none";
     private Dimensions dimensions = new Dimensions();
 

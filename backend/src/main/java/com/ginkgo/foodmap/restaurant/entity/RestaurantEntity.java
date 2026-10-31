@@ -36,4 +36,26 @@ public class RestaurantEntity {
     /** GCJ-02 清水河参考点直线公里数，数据库全局排序用同一表达式。 */
     @TableField(exist = false)
     private Double distanceKm;
+
+    /** 同属restaurant模块的统计投影；条数含历史，人数只计每账号最新有效点评。 */
+    @TableField(exist = false)
+    private long reviewCount;
+    @TableField(exist = false)
+    private long participantCount;
+    /** 均分由累计值除以人数取得；null表示无人计分，真实0分必须保留。 */
+    @TableField(exist = false)
+    private BigDecimal score;
+    @TableField(exist = false)
+    private BigDecimal recommendRate;
+    @TableField(exist = false)
+    private BigDecimal taste;
+    @TableField(exist = false)
+    private BigDecimal value;
+    @TableField(exist = false)
+    private BigDecimal service;
+    @TableField(exist = false)
+    private BigDecimal ambience;
+    /** SQL直接比较累计值与人数乘阈值，不使用已舍入均分判档。 */
+    @TableField(exist = false)
+    private String tier;
 }

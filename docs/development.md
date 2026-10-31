@@ -1,5 +1,122 @@
 # 当前开发记录
 
+## 2026-10-31：完成本人点评删除的前后端闭环
+
+- 最新及历史点评仅在已认证账号ID等于作者ID时显示删除入口，昵称相同或管理员角色不能代替归属；DELETE /api/reviews/{reviewId}始终由后端从安全上下文取身份并校验。二次确认支持取消/Escape，历史面板关闭后释放滚动锁再确认；失败留在确认框内重试，成功回点评第一页并刷新餐厅统计。
+- 事务先锁父店、重读点评，与发评/回复/删店共用锁顺序；删除历史只减条数，删除代表取上一条接替，删除本人最后一条移除人数及贡献。回复/照片关联硬删除，媒体通过file应用服务转为PENDING_DELETE；复用后台回收，OSS请求在事务外，失败保留重试。授权、统计或媒体失败全部回滚，不支持评价恢复或管理员代删。
+- 新增V8独立发布/删除回执，回填存量点评。新发布与回执同事务，唯一键封住跨店并发重放窗口；删评只保留作者、UUID、点评/餐厅ID和删除时间，不保留正文照片。回执持续保留、当前无自动过期，账号清理另定策略；旧发布返回409 REVIEW_REQUEST_DELETED，本人重复删评204，不重复扣分。旧回复因原点评不存在返回404，不复活父内容。
+- npm run check通过：198项前端测试、类型检查和生产构建通过，ESLint零错误，仅原RestaurantDetail.spec.ts两项可选prop默认值警告。真实MySQL 8.4隔离3321执行完整verify（restaurant.integration/review.integration均开启）：407项中385项执行通过、22项条件跳过，零失败/错误。覆盖匿名/越权、最新/历史/最后一条、统计回退、重复删除、旧请求拒绝、并发发布删除、子资源及媒体状态事务回滚、V7存量回填/重复迁移，以及OSS失败后后台重试成功。初轮迁移测试版本断言仍为V7导致失败，更新到V8并补回填测试后完整复跑通过。
+- Edge浏览器1440、390、320px验证本人/同名他人入口、原生确认框焦点/Escape、历史删除转入确认框、失败重试、成功刷新和手机不溢出，零脚本错误。浏览器删除响应由独立测试上下文拦截，业务写入0；真实删除和计分由隔离MySQL接口测试验证，不将浏览器替身称为真实业务库删除验收。云清理用OSS替身验证重试，本轮不删除真实云对象验证。
+- 开发后端8080使用本轮验证JAR启动（PID9208），开发库Flyway已从V7升级V8并回填；前端5173已启动。检查发现本地Redis未运行，复用既有D:/Redis_new/...-6379/redis.conf启动，未改配置。保留feat/reviews及原未提交成果，未创建分支、提交、推送或部署。
+- 验证证据：D:/eat/.codex-backups/review-delete-backend-verify.log、ginkgo-browser-check/review-delete-check.cjs及artifacts/review-delete/facts.json、confirmation-320.png。git diff --check和文档链接/JSON检查通过。
+
+| 文件（相对仓库根目录） | 本轮用途 |
+| --- | --- |
+| backend/src/main/java/com/ginkgo/foodmap/review/controller/ReviewDeleteController.java | 本人DELETE入口及204/no-store |
+| backend/src/main/java/com/ginkgo/foodmap/review/service/ReviewDeleteService.java | 作者授权、父锁、事务删除及代表回退 |
+| backend/src/main/java/com/ginkgo/foodmap/review/mapper/ReviewDeleteMapper.java | 独立请求回执及review自有子资源删除 |
+| backend/src/main/java/com/ginkgo/foodmap/review/service/ReviewWriteService.java | 发布登记回执、拒绝删除后重放 |
+| backend/src/main/java/com/ginkgo/foodmap/review/exception/ReviewErrorCode.java | 删评404/403、旧发布409及通用重试提示 |
+| backend/src/main/resources/db/migration/V8__retain_review_request_receipts.sql | 新增回执表并回填存量 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/dto/RestaurantReviewDelta.java | 条数增量支持发布+1、删除-1 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/mapper/RestaurantReviewStatisticsMapper.java | 同一SQL更新正负累计值 |
+| backend/src/main/java/com/ginkgo/foodmap/file/service/MediaFileService.java | 跨模块公开媒体释放入口 |
+| backend/src/main/java/com/ginkgo/foodmap/file/mapper/MediaFileMapper.java | BOUND转可重试PENDING_DELETE |
+| backend/src/test/java/com/ginkgo/foodmap/review/ReviewWriteApiIntegrationTest.java | 权限、代表回退、回滚、重放及并发删除 |
+| backend/src/test/java/com/ginkgo/foodmap/review/ReviewSchemaIntegrationTest.java | V8升级、回填及重复迁移 |
+| backend/src/test/java/com/ginkgo/foodmap/restaurant/RestaurantSchemaIntegrationTest.java | 更新完整迁移链断言 |
+| backend/src/test/java/com/ginkgo/foodmap/file/ImageUploadIntegrationTest.java | 带图删评与云失败回收重试 |
+| frontend/src/modules/review/api/reviewApi.ts、reviewApi.spec.ts | 真实DELETE适配及固定凭证/失败验证 |
+| frontend/src/modules/review/model/review.ts、reviewHistory.spec.ts | 预览权限标记说明及历史作者删除回归 |
+| frontend/src/modules/review/review.spec.ts | 本人入口、同名他人拒绝、确认取消及失败重试 |
+| frontend/src/modules/review/ui/ReviewEntry.vue、ReviewHistory.vue、ReviewPanel.vue | 最新/历史作者入口、二次确认及分页/统计刷新 |
+| docs/api.md、features.md、architecture/review-schema.md、plans/review-backend.md、plans/review-roadmap.md | 同步协议、数据保留策略及完成度 |
+
+## 2026-10-30：补齐更多筛选、人均上限与校区直线距离
+
+- 核对Git历史：8种排序（综合、距离、人均、点评数、味道/性价比/环境/服务）一直存在；旧目录仅有分类、搜索、经营状态及已按用户要求取消的杯型/推荐踩雷，未实现目录价格或距离上限。随机选店预算原来只属于随机流程。本轮恢复“更多筛选”入口，新增真实高级查询能力，不恢复已明确取消的杯型规则，不编造其他条件。
+- 列表API新增可选maxPrice（元）与maxDistanceMeters（米），明确类型/边界校验并加入Controller绑定白名单。共用SQL条件在COUNT、排序和LIMIT前应用，保持同一只读事务快照、稳定排序及准确总页数。价格上限含边界且估值参与，未知价格在开启时排除；距离未舍入比较，缺坐标或待定位排除，未启用时未知值仍保留。复用现有字段，无新表、字段、迁移、数据回填或业务写入。
+- Haversine表达式从原距离排序抽为同一SQL片段，地球半径6371000米，使用原站index.html:2449的CAMPUS定义（清水河校区GCJ-02纬度30.7544、经度103.9312），不是本轮编造参考点。筛选统一传米，既有distanceKm响应继续返回公里以兼容卡片与客户端。项目目前是单校区固定参考点，没有多校区切换、实时定位授权或步行距离，未重新测绘原站参考位置。
+- 前端保留现有分类导航、全部排序及停业按钮，工具栏右侧恢复更多筛选与有效条件数。简洁双分组弹窗提供20/30/50/100元、500/1000/2000/3000米及不限；草稿确认批量写回只触发一次请求，取消不提交，重置只管理两项高级草稿；仅高级条件生成可删除标签。原生dialog与Teleport处理顶层模态、焦点约束、Escape、遮罩及滚动锁，窄屏/横屏滚动内容而保留底部按钮。复用Pinia、分页和请求取消，无新UI框架。随机选店通过已有条件快照自动继承新增约束，原随机和预算逻辑未修改。
+- Java21真实MySQL8.4专用回环3321执行`mvn --batch-mode --no-transfer-progress verify -Drestaurant.integration=true -Dreview.integration=true`通过并打包：401项中379项实际通过、22项条件跳过、0失败/错误。餐厅读取67项全部执行通过，比原53项增加14项，验证30与29.99元边界、999/1001米、未知价格/位置、火锅+50元、火锅+2公里+隐藏停业、价格/距离/综合分及跨页全局排序、空集合和非法参数。首轮测试环境误连已占用的旧3319实例导致认证失败，改为新建独立数据目录的3321实例后完整重跑通过；未向开发或生产库写夹具。
+- `npm run check`通过：26文件、194项前端测试，ESLint无错误（保留2条既有ReviewHistoryPreview可选prop警告）、vue-tsc与生产构建成功。测试验证真实Axios参数传递、组合条件不覆盖、确认一次查询/第一页、草稿取消/重置/重开、单标签移除与空结果重置。Edge在1440×960、390×844、320×568、844×390实际验收：无横向溢出或脚本错误，按钮和页脚完整可见，未确认不请求，取消焦点恢复，生效数量和标签正确；浏览器仅GET，业务写入0。
+- 使用开发接口的全部27家店及独立Haversine函数核对6组查询，按每页2条遍历验证记录集合、无重复和总页数：30元以下17家；1公里内、火锅50元以下、火锅2公里内且隐藏停业、30元且1公里内及极低预算组合均为0家，与实际数据一致。当前25家位置待补，另外2家不在所测距离范围内；当前无未知价格，但未知值排除已在独立MySQL夹具验证。距离筛选要获得更多结果仍依赖真实位置补录，不通过模拟坐标制造命中。
+- 同步接口、功能、需求与找店方案；`git diff --check`及文档60个本地链接、25个JSON示例检查通过。证据位于仓库外advanced-filter-backend-verify.log、advanced-filter-frontend-check.log、advanced-filter-browser.log与ginkgo-browser-check/artifacts/advanced-filter/。新版后端使用验证后JAR副本重启到8080（PID20016），前端5173热更新，开发库仍V7且无新增迁移。测试实例已清理并关闭；保留feat/reviews与原有未提交成果，未新建分支、提交、推送或部署。
+
+## 2026-10-30：首页筛选入口去重与轻量操作栏
+
+- 按用户明确的UI/UX范围收紧筛选系统：分类只保留顶部横向导航和橙色下划线；综合、距离、人均、点评数及四维共8种既有排序整合为一个分组单选框；经营状态改为“隐藏停业餐厅”即时开关，不声称提供实时营业状态。
+- 当前目录只有关键词、分类、排序和停业标记，无独立高级条件，因此删除双栏筛选弹窗、重复入口及已选标签，不保留空置的“更多筛选”。空结果只有存在可清除条件时才显示重置按钮。原生select承担分组、键盘导航、选中回显、选择关闭及Escape取消，不额外维护草稿或焦点锁。
+- 复用现有Pinia状态、查询watch、请求取消和分页机制；分类切换不重置排序及停业条件，选择相同排序不重复查询。原目录没有URL筛选同步，本轮不新增；详情后退继续保留目录条件。搜索、卡片、主导航、底部导航及随机选店业务保持既有实现；后端、API协议和数据库没有新增变更，保留工作区此前成果。
+- `npm run check`通过：26个测试文件、192项测试通过，类型检查及生产构建成功；ESLint为0错误、2条既有ReviewHistoryPreview可选prop警告。目录行为测试替换已删除弹窗的草稿断言，覆盖全部排序、相同值不重查、分类/停业组合保留、第一页重置、单次请求及无条件空结果不显示重置。
+- Edge真实开发接口在1440×960、390×844、320×568验收通过：分类横滑、统一排序、停业双向切换、组合条件、第二页切换条件回第一页、详情后退保留状态、下拉Escape关闭/焦点及零额外请求；页面无横向溢出、脚本错误，两个操作控件高度均44px。筛选组件含搜索区域实测高160px，较旧版默认状态184px缩减24px，应用条件后不再新增标签行。仅GET读取，无业务写入。
+- 证据位于仓库外`D:/eat/.codex-backups/filter-simplify-check.log`、`filter-simplify-browser.log`及`ginkgo-browser-check/artifacts/filter-simplify/`。功能说明、需求和找店方案已同步；文档60个本地链接、25个JSON示例与`git diff --check`通过。前端5173热更新、后端8080继续运行；未新建分支、提交、推送或部署。高级弹窗的确认/取消/重置不再适用，未来有真实额外条件时再实现，不以空弹窗充数。
+
+## 2026-10-30：移除前端杯型并接通滚动筛选与真实统计
+
+- 按用户明确要求取消餐厅杯型评级、杯型筛选、相关说明表和按杯型定义的推荐/踩雷入口；删除CupBadge组件及前端分档/类型/状态/导出，保留原版社团封面与页头品牌图标。四维等权均分与独立推荐率不变，贝叶斯排序继续仅为后续设计。后端tiers/view/tier保留为兼容契约，新前端不发送、不读取，不在本轮破坏已有HTTP契约或修改迁移。
+- 正式首页采用截图确认的交互：快捷分类及条件横向滚动，右侧固定筛选入口；模态面板按分类、常用排序、单项排序及经营状态分组，左右滚动独立、滚动同步高亮、底部按钮固定。确认前只编辑草稿，重置不提前查询，取消丢弃草稿，确认批量写入条件并由现有store发一次查询；原生dialog与Teleport处理焦点、背景inert及首页clip-path，关闭/卸载释放滚动锁，窗口变化重新定位，手机按钮保持在视口内，点击目标至少44px。
+- 卡片与详情使用餐厅接口的均分、participantCount和reviewCount，不按图片请求或点评当前页推算评分人数。真实0分正常显示，无人时显示暂无评分。发布成功回执关闭后分别刷新点评第一页与统计，刷新不卸载讨论面板；统计失败保留上次值并提供只读重试，切店及卸载取消并拒绝晚到结果，返回目录时重新读取权威排序。
+- npm run check通过：ESLint、183项前端测试、vue-tsc与生产构建。测试数变化包含删除已废弃的杯型分档/徽章/推荐踩雷共22项旧规则断言，新增4项筛选及统计生命周期用例；原品牌素材、认证、回复、图片、分页与发布测试继续通过。jsdom测试显式模拟原生dialog方法，实际模态行为由Edge另验，不把桩当浏览器验收。
+- Edge真实读取1440×960、390×844、320×768：无横向溢出或脚本错误；筛选草稿不发请求、确认组合分类与性价比、取消/焦点恢复、滚动高亮及清空通过。手机快捷栏确有横向溢出供滑动，面板确定按钮均在视口内。公开目录请求未携带tiers/view；餐厅20真实返回3人、16条点评、综合约7.1667，页面正确展示人数/条数。详情与评分说明无杯型和待接入文案。浏览器仅GET，业务写入0；发布后刷新由组件事件及受控响应测试，真实持久化发布与跨设备正向验收仍待用户。
+- 已将此前verify通过的统计读取JAR复制到仓库外score-filter-dev-start并重启后端8080（PID30476），健康UP；前端5173原Vite进程PID14696热更新。开发库仍V7，无新迁移、未写模拟业务数据、未访问生产。快速切页时照片流因客户端断开出现一次AsyncRequestNotUsableException及图片Content-Type下错误响应转换日志，浏览器无脚本错误；该图片异常处理不在本轮前端改动范围，不记作已修复。
+- 证据：D:/eat/.codex-backups/frontend-filter-complete.log、frontend-filter-browser-final.log及ginkgo-browser-check/artifacts/filter-ui/的截图和facts.json。同步需求、功能、接口、结构及两份评价计划和找店方案；保留原feat/reviews分支与之前未提交的后端成果，未新建分支、提交、推送或部署。当前修改文件与用途如下（相对仓库根目录），上述后端统计步骤的文件清单仍见下一节。
+
+| 文件 | 本轮用途 |
+| --- | --- |
+| frontend/src/app/router/index.ts | 移除杯型导出或更新评分说明路由标题 |
+| frontend/src/modules/restaurant/api/restaurant.test-data.ts | 补齐真实契约的评分人数夹具 |
+| frontend/src/modules/restaurant/api/restaurantApi.spec.ts | 验证人数映射与不再发送杯型/推荐踩雷参数 |
+| frontend/src/modules/restaurant/api/restaurantApi.ts | 映射participantCount并显式发送当前有效查询参数 |
+| frontend/src/modules/restaurant/index.ts | 移除杯型导出或更新评分说明路由标题 |
+| frontend/src/modules/restaurant/model/catalog.logic.spec.ts | 移除废弃杯型规则用例，保留搜索排序与未知值验证 |
+| frontend/src/modules/restaurant/model/catalog.logic.ts | 删除杯型分档与相关筛选，保留四维/价格/距离规则 |
+| frontend/src/modules/restaurant/model/catalog.preview.ts | 预览空评分补零人数，不引入虚构评价 |
+| frontend/src/modules/restaurant/model/catalog.store.ts | 删除杯型和推荐/踩雷状态，保留分页、取消及失效机制 |
+| frontend/src/modules/restaurant/model/restaurant.types.ts | 删除杯型/视图类型，增加评分人数 |
+| frontend/src/modules/restaurant/ui/RandomRestaurant.vue | 去除杯型条件与文案，沿用现行目录条件 |
+| frontend/src/modules/restaurant/ui/RestaurantCard.vue | 删除杯型，展示真实均分、有效人数与总条数 |
+| frontend/src/modules/restaurant/ui/RestaurantCatalog.spec.ts | 验证确认前不查询、取消/重置草稿、确认一次查询与焦点恢复 |
+| frontend/src/modules/restaurant/ui/RestaurantCatalog.vue | 目录组合新筛选组件，删除分散条件和杯型空态 |
+| frontend/src/modules/restaurant/ui/RestaurantDetail.spec.ts | 验证真实0分、人数/条数、统计刷新故障与切店晚到响应 |
+| frontend/src/modules/restaurant/ui/RestaurantDetail.vue | 接通统计与发布后独立刷新、失败重试及切店取消 |
+| frontend/src/modules/review/ui/ReviewComposer.vue | 去除单条杯型及旧查询条件，保留四维与发布机制 |
+| frontend/src/pages/home/HomePage.vue | 更新评分说明入口文案，保留原品牌封面 |
+| frontend/src/pages/home/brand-parity.spec.ts | 移除废弃杯型断言，继续保护原封面和社团文案 |
+| frontend/src/pages/scoring/ScoringGuidePage.vue | 删除杯型说明表，解释最新计分、人数及真实0分 |
+| frontend/src/shared/ui/layout/AppHeader.vue | 说明保留的是品牌杯子图标，不是业务评级 |
+| frontend/src/modules/restaurant/ui/RestaurantFilters.vue | 统一滑动筛选、独立草稿、模态焦点、双栏滚动与固定确认按钮 |
+| frontend/src/modules/restaurant/ui/CupBadge.vue（删除） | 删除业务杯型组件及其视觉标语 |
+| docs/requirements.md、docs/features.md、docs/api.md | 取消杯型产品规则，更新当前交互、统计展示和后端兼容边界 |
+| docs/architecture/review-schema.md、docs/plans/review-backend.md、docs/plans/review-roadmap.md、docs/plans/discovery-ui.md | 同步已完成与待办，取消原杯型榜要求 |
+| docs/development.md | 记录本轮实现、验证、运行状态与限制 |
+
+## 2026-10-30：确认初版均分规则并接通餐厅统计后端（第1、2步）
+
+- 按用户授权完成规则确认与统计读取，在原feat/reviews分支修改，未新建分支。初版所有正常用户等权，每账号每店只取最新有效点评；四维分别平均，综合分继续平均已按HALF_UP保留两位的单条总分。明确评分人数与含历史的点评条数、无人评分与真实0分、展示舍入与原始杯型的区别。记录推荐排序公式W=(nR+mC)/(n+m)，仅为后续设计，参数及适用入口未定，不用于本轮展示或杯型。
+- 列表、详情及管理回执关联restaurant自己的统计读模型，返回participantCount、reviewCount、综合分、四维、独立推荐率及杯型，不跨模块关联reviews。均分先扩展十进制精度再除法，杯型直接比较累计值与人数乘阈值；真实0分保留，无人时返回null/none。COUNT、筛选、结果及标签在同一REPEATABLE_READ只读快照；评分/四维/总条数排序及杯型/推荐/踩雷筛选在LIMIT前执行，同值沿用名称/ID顺序。推荐视图继续指大杯及以上，与独立推荐率无关。
+- 无新表、新迁移或业务数据补写。保留首次发评事务内的惰性初始化，LEFT JOIN兼容新店及旧版本缺失零行，公开GET不补写。选择该方式可以复用已有发布事务，也避免为零行引入另一条写入路径；运行时重建、删除回退及异常治理不在本轮实施。
+- 真实MySQL8.4.0独立回环3319实例验证，Java21执行`mvn --batch-mode --no-transfer-progress verify '-Drestaurant.integration=true' '-Dreview.integration=true'`成功并打包JAR：387项中365项实际通过、0失败/错误、22项条件跳过；不能记为387项全部执行。餐厅读取53项全部通过，其中新增20项覆盖统计映射、空/零、全部杯型临界值、真实全局排序/分页、视图交集、大人数下高精度差异及并发快照；原发布测试增加3条/2人/7.50分/50%推荐的真实公开读取与管理回执断言，原发布幂等、并发、故障回滚及餐厅维护测试亦执行通过。首轮发现管理Mapper复用SQL时嵌套片段按错误命名空间解析，修正全限定引用后完整重跑通过。
+- 仓库外只读审计器显式限制127.0.0.1/localhost:3306的ginkgo_food_map开发库，使用服务器只读事务和一致快照，从全部点评按账号时间/ID最新代表重新推导后逐项比对：27家餐厅、34条点评、21份有效用户贡献，统计差异0家；1家无点评餐厅缺零统计行，已由只读兼容覆盖，无需修复数据。开发模拟数据不进入生产。当前小数据EXPLAIN显示统计表PRIMARY等值连接，目录排序仍有temporary/filesort；没有大库压测或吞吐提升结论。
+- 验证日志为仓库外`D:/eat/.codex-backups/score-read-verify-final.log`和`score-statistics-audit.log`，审计器为`ScoreStatisticsAudit.java`。修改文档的60个本地文件链接及25个JSON示例检查通过，`git diff --check`通过；确认独立实例残留ginkgo测试库为0后关闭本轮MySQL3319。前端未修改，未重跑前端构建/浏览器验收，未重启前后端；运行中的服务尚未加载本轮后端。未提交、推送、合并或部署。后续先接详情统计区/人数/发布后刷新，再统一首页展示并联调。
+
+本轮修改文件及用途（路径相对仓库根目录）：
+
+| 文件 | 用途 |
+| --- | --- |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/dto/RestaurantListQuery.java | 移除所有餐厅均待评级的旧派生条件 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/entity/RestaurantEntity.java | 增加本模块统计投影，不作为接口对象 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/mapper/RestaurantCatalogMapper.java | 更新统计读取职责说明 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/service/RestaurantReadService.java | 映射真实统计、人数与条数到公开白名单 |
+| backend/src/main/java/com/ginkgo/foodmap/restaurant/vo/RestaurantVo.java | 增加公开participantCount并说明空值语义 |
+| backend/src/main/resources/mapper/restaurant/RestaurantCatalogMapper.xml | 共享统计连接、精确杯型、真实筛选和全局排序 |
+| backend/src/main/resources/mapper/restaurant/RestaurantWriteMapper.xml | 管理回执复用相同统计投影，防止保存资料后分数空态 |
+| backend/src/test/java/com/ginkgo/foodmap/restaurant/RestaurantReadApiIntegrationTest.java | 新增真实MySQL统计读取、边界、分页及并发快照验证 |
+| backend/src/test/java/com/ginkgo/foodmap/review/ReviewWriteApiIntegrationTest.java | 验证真实发布后公开统计及授权管理读取一致 |
+| docs/requirements.md、docs/api.md、docs/features.md | 固定产品规则、更新接口字段与当前可用范围 |
+| docs/architecture/review-schema.md、docs/plans/review-backend.md、docs/plans/review-roadmap.md | 同步读模型选择与后端完成/前端待办边界 |
+| docs/development.md | 记录本轮实现、取舍、验证及未完成内容 |
+
 ## 2026-10-30：整理一次本地提交
 
 - 按用户要求，在现有feat/review-replies分支将累计开发成果整理为一次本地提交：点评发布与最新代表计分、最多五图上传/绑定/访问/回收、作者分组与历史分页、单层回复及简化交互、首页目录展示、模块职责调整、测试与文档归档。上述功能存在依赖，不单独提交回复组件而遗漏其读取、上传和公开作者服务。

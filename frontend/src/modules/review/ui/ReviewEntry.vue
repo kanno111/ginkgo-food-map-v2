@@ -10,6 +10,8 @@ defineProps<{
   item: ReviewItem
   preview?: boolean
   authenticated: boolean
+  /** 已认证账号ID，仅用于入口展示；不能代替服务端授权。 */
+  viewerId?: string
   busy: boolean
   replyTexts: Record<string, string>
   showHistory: boolean
@@ -55,8 +57,9 @@ defineEmits<{
       </button>
     </div>
     <button
-      v-if="item.canDelete && (preview || authenticated)"
+      v-if="preview ? item.canDelete : authenticated && !!viewerId && item.authorId === viewerId"
       type="button"
+      :disabled="busy"
       @click="$emit('delete', item)"
     >
       {{ preview ? '演示删除此点评' : '删除评价' }}
@@ -105,6 +108,7 @@ defineEmits<{
           :item="previous"
           :preview="preview"
           :authenticated="authenticated"
+          :viewer-id="viewerId"
           :busy="busy"
           :reply-texts="replyTexts"
           :show-history="false"

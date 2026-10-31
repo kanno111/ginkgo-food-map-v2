@@ -21,6 +21,7 @@ export interface RestaurantResponse {
   score: number | null
   recommendRate: number | null
   reviewCount: number
+  participantCount: number
   dimensions: RestaurantReadModel['dimensions']
 }
 
@@ -79,6 +80,7 @@ export function toRestaurantModel(value: RestaurantResponse): RestaurantReadMode
     score: value.score,
     recommendRate: value.recommendRate,
     reviewCount: value.reviewCount,
+    participantCount: value.participantCount,
     dimensions: value.dimensions,
     source: value.sourceType,
     distanceKm: value.distanceKm,
@@ -96,7 +98,7 @@ export async function fetchRestaurantCategories(
   return response.data.data
 }
 
-/** 全量条件交给服务端，tiers使用重复参数而非tiers[]，匹配Spring列表参数绑定。 */
+/** 全量条件交给服务端；显式列出有效字段，不发送已经移除的杯型和推荐/踩雷参数。 */
 export async function fetchRestaurants(
   filters: CatalogFilters,
   page: number,
@@ -106,7 +108,16 @@ export async function fetchRestaurants(
   const response = await httpClient.get<ApiResponse<RestaurantPage<RestaurantResponse>>>(
     '/api/restaurants',
     {
-      params: { ...filters, tiers: [...filters.tiers], page, pageSize },
+      params: {
+        keyword: filters.keyword,
+        category: filters.category,
+        sort: filters.sort,
+        hideClosed: filters.hideClosed,
+        maxPrice: filters.maxPrice ?? undefined,
+        maxDistanceMeters: filters.maxDistanceMeters ?? undefined,
+        page,
+        pageSize,
+      },
       paramsSerializer: { indexes: null },
       signal,
     },

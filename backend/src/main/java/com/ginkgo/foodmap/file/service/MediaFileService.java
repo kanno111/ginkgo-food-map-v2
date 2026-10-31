@@ -27,6 +27,15 @@ public class MediaFileService {
         }
     }
 
+    /** 调用方先验证点评归属；和删评同事务登记清理，失败时关联与文件状态一起回滚。 */
+    @Transactional(propagation=Propagation.MANDATORY)
+    public void releaseBound(List<Long> ids, long owner) {
+        for (long id : ids.stream().sorted().toList()) {
+            if (files.releaseBound(id, owner) != 1)
+                throw new IllegalStateException("Missing bound review media");
+        }
+    }
+
     /** 仅在调用方已验证点评可见性与关联后读取；不提供按文件ID公开HTTP访问。 */
     public byte[] readBound(long id) {
         var row=files.find(id);

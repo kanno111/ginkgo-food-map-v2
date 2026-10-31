@@ -68,6 +68,7 @@ class ImageUploadIntegrationTest {
     }
     @BeforeEach void setup() {
         reset(sessions,storage);
+        jdbc.update("DELETE FROM review_request_receipts");
         jdbc.update("DELETE FROM review_photos");
         jdbc.update("DELETE FROM media_files");
         jdbc.update("DELETE FROM reviews");jdbc.update("DELETE FROM restaurant_review_statistics");
@@ -188,6 +189,31 @@ class ImageUploadIntegrationTest {
         jdbc.update("UPDATE restaurants SET deleted_at=CURRENT_TIMESTAMP,delete_reason_code='SYSTEM' WHERE id=1");
         mvc.perform(get("/api/reviews/"+review+"/photos/0")).andExpect(status().isNotFound());
     }
+    /** 删评先提交待清理状态；OSS失败不复活点评，后台重试成功才移除文件登记。 */
+    @Test void reviewDeletionQueuesBoundPhotosAndRetriesCloudFailure() throws Exception {
+        String file=uploadId();
+        String response=publish(reviewInput(List.of(file),UUID.randomUUID().toString()))
+            .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String review=json.readTree(response).get("data").get("reviewId").asString();
+        mvc.perform(delete("/api/reviews/"+review).header("Authorization","Bearer "+other)).andExpect(status().isForbidden());
+        assertThat(files.find(Long.parseLong(file)).getStatus()).isEqualTo("BOUND");
+        mvc.perform(delete("/api/reviews/"+review).header("Authorization","Bearer "+owner)).andExpect(status().isNoContent());
+        verify(storage,never()).delete(anyString(),anyString());
+        assertThat(files.find(Long.parseLong(file)).getStatus()).isEqualTo("PENDING_DELETE");
+        doThrow(new IllegalStateException("test cloud unavailable")).when(storage).delete(anyString(),anyString());
+        cleanupJob().cleanup();
+        assertThat(files.find(Long.parseLong(file)).getStatus()).isEqualTo("PENDING_DELETE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM reviews",Long.class)).isZero();
+        reset(storage);
+        doAnswer(call->{
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return null;
+        }).when(storage).delete(anyString(),anyString());
+        cleanupJob().cleanup();
+        verify(storage).delete(anyString(),anyString());
+        assertThat(files.find(Long.parseLong(file))).isNull();
+    }
+
     @Test void invalidSecondPhotoRollsBackFirstBindingReviewAndStatistics() throws Exception {
         String first=uploadId(),second=uploadId();
         jdbc.update("UPDATE media_files SET uploader_user_id=22 WHERE id=?",second);

@@ -65,6 +65,8 @@ class ReviewWriteApiIntegrationTest {
     @BeforeEach void setup() {
         statisticsTarget=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(statistics);
         reset(sessions,statisticsTarget);
+        jdbc.update("DELETE FROM review_replies");jdbc.update("DELETE FROM review_photos");
+        jdbc.update("DELETE FROM media_files");jdbc.update("DELETE FROM review_request_receipts");
         jdbc.update("DELETE FROM reviews");jdbc.update("DELETE FROM restaurant_review_statistics");
         jdbc.update("DELETE FROM restaurants");jdbc.update("DELETE FROM user_roles");jdbc.update("DELETE FROM users");
         for(long id:List.of(11L,22L)) {
@@ -102,6 +104,15 @@ class ReviewWriteApiIntegrationTest {
         publish(owner,1,input(6,false,UUID.randomUUID().toString())).andExpect(status().isCreated());
         publish(other,1,input(9,true,UUID.randomUUID().toString())).andExpect(status().isCreated());
         assertThat(count("reviews")).isEqualTo(3);assertStats(3,2,1,"15");
+        mvc.perform(get("/api/restaurants/1")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.reviewCount").value(3))
+            .andExpect(jsonPath("$.data.participantCount").value(2))
+            .andExpect(jsonPath("$.data.score").value(7.5))
+            .andExpect(jsonPath("$.data.recommendRate").value(0.5))
+            .andExpect(jsonPath("$.data.tier").value("super"));
+        mvc.perform(get("/api/restaurants/1/management").header("Authorization","Bearer "+owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.restaurant.score").value(7.5))
+            .andExpect(jsonPath("$.data.restaurant.participantCount").value(2));
     }
     @Test void canonicalReplayAndContentConflict() throws Exception {
         String uuid=UUID.randomUUID().toString();var data=input(7,true,uuid);data.put("body","　测试正文五个字\u00a0");
@@ -207,6 +218,78 @@ class ReviewWriteApiIntegrationTest {
         assertStats(2,1,0,"6");
         assertThat(jdbc.queryForObject("SELECT overall_score FROM reviews ORDER BY created_at DESC,id DESC LIMIT 1",BigDecimal.class)).isEqualByComparingTo("6");
     }
+    /** 删除代表、历史、最后一条分别验证差量，以及匿名/越权和本人重试。 */
+    @Test void deletesOnlyOwnReviewsAndRestoresPreviousRepresentative() throws Exception {
+        long first = publishId(owner, 8, true);
+        long second = publishId(owner, 6, false);
+        publishId(other, 9, true);
+        mvc.perform(delete("/api/reviews/"+second)).andExpect(status().isUnauthorized());
+        removeReview(other, second).andExpect(status().isForbidden());assertStats(3,2,1,"15");
+        removeReview(owner, second).andExpect(status().isNoContent()).andExpect(header().string("Cache-Control","no-store"));
+        assertStats(2,2,2,"17");
+        mvc.perform(get("/api/restaurants/1/reviews")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.totalReviews").value(2)).andExpect(jsonPath("$.data.totalGroups").value(2));
+        removeReview(owner, second).andExpect(status().isNoContent());assertStats(2,2,2,"17");
+        removeReview(other, second).andExpect(status().isForbidden());
+        removeReview(owner, first).andExpect(status().isNoContent());assertStats(1,1,1,"9");
+        long last=jdbc.queryForObject("SELECT id FROM reviews",Long.class);
+        removeReview(other,last).andExpect(status().isNoContent());assertStats(0,0,0,"0");
+        mvc.perform(get("/api/restaurants/1")).andExpect(status().isOk()).andExpect(jsonPath("$.data.reviewCount").value(0))
+            .andExpect(jsonPath("$.data.participantCount").value(0)).andExpect(jsonPath("$.data.score").isEmpty());
+        removeReview(owner,999999).andExpect(status().isNotFound());
+        mvc.perform(delete("/api/reviews/01").header("Authorization","Bearer "+owner)).andExpect(status().isBadRequest());
+    }
+
+    @Test void deletingHistoryDoesNotChangeScoresAndOldPublishCannotResurrect() throws Exception {
+        String uuid=UUID.randomUUID().toString();var data=input(8,true,uuid);
+        long history=Long.parseLong(json.readTree(publish(owner,1,data).andReturn().getResponse().getContentAsString()).get("data").get("reviewId").asText());
+        publishId(owner,6,false);
+        removeReview(owner,history).andExpect(status().isNoContent());assertStats(1,1,0,"6");
+        publish(owner,1,data).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("REVIEW_REQUEST_DELETED"));
+        publish(owner,2,data).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("REVIEW_REQUEST_DELETED"));
+        assertThat(count("reviews")).isEqualTo(1);
+        publishId(owner,7,true);assertStats(2,1,1,"7");
+    }
+
+    /** 注入统计失败证明回执、回复、关联和媒体状态均原子回滚，之后可以安全重试。 */
+    @Test void deletionRollsBackChildrenMediaAndReceiptThenSchedulesCleanup() throws Exception {
+        long id=publishId(owner,8,true);
+        jdbc.update("INSERT INTO media_files(id,uploader_user_id,bucket_name,storage_key,content_type,byte_size,width,height,sha256,status,bound_at) VALUES(991,11,'test-bucket','review/delete.jpg','image/jpeg',100,10,10,UNHEX(REPEAT('00',32)),'BOUND',CURRENT_TIMESTAMP(6))");
+        jdbc.update("INSERT INTO review_photos(review_id,position,media_file_id) VALUES(?,0,991)",id);
+        jdbc.update("INSERT INTO review_replies(review_id,author_user_id,body,client_request_id,request_hash) VALUES(?,22,'回复正文',UUID_TO_BIN(?),UNHEX(REPEAT('00',32)))",id,UUID.randomUUID().toString());
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("injected failure")).when(statisticsTarget).applyDelta(anyLong(),any());
+        removeReview(owner,id).andExpect(status().isConflict());
+        assertThat(count("reviews")).isEqualTo(1);assertThat(count("review_replies")).isEqualTo(1);assertThat(count("review_photos")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM media_files WHERE id=991",String.class)).isEqualTo("BOUND");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM review_request_receipts WHERE deleted_at IS NOT NULL",Long.class)).isZero();assertStats(1,1,1,"8");
+        reset(statisticsTarget);removeReview(owner,id).andExpect(status().isNoContent());
+        assertThat(count("reviews")).isZero();assertThat(count("review_replies")).isZero();assertThat(count("review_photos")).isZero();assertStats(0,0,0,"0");
+        assertThat(jdbc.queryForObject("SELECT status FROM media_files WHERE id=991",String.class)).isEqualTo("PENDING_DELETE");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM media_files WHERE expires_at<=CURRENT_TIMESTAMP(6)",Long.class)).isEqualTo(1);
+        mvc.perform(get("/api/reviews/"+id+"/photos/0")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/reviews/"+id+"/replies")).andExpect(status().isNotFound());
+    }
+
+    @Test void concurrentDeletionAndPublishingKeepStatisticsConsistent() throws Exception {
+        long first=publishId(owner,8,true),second=publishId(owner,6,false);
+        try(var pool=Executors.newFixedThreadPool(3)) {
+            var a=pool.submit(()->removeReview(owner,second).andReturn().getResponse().getStatus());
+            var b=pool.submit(()->removeReview(owner,second).andReturn().getResponse().getStatus());
+            var c=pool.submit(()->publish(owner,1,input(9,true,UUID.randomUUID().toString())).andReturn().getResponse().getStatus());
+            assertThat(a.get(20,TimeUnit.SECONDS)).isEqualTo(204);assertThat(b.get(20,TimeUnit.SECONDS)).isEqualTo(204);
+            assertThat(c.get(20,TimeUnit.SECONDS)).isEqualTo(201);assertStats(2,1,1,"9");
+            removeReview(owner,first).andExpect(status().isNoContent());assertStats(1,1,1,"9");
+        }
+    }
+
+    private long publishId(String who,double score,boolean recommended) throws Exception {
+        var result=publish(who,1,input(score,recommended,UUID.randomUUID().toString())).andExpect(status().isCreated()).andReturn();
+        return Long.parseLong(json.readTree(result.getResponse().getContentAsString()).get("data").get("reviewId").asText());
+    }
+    private org.springframework.test.web.servlet.ResultActions removeReview(String who,long id) throws Exception {
+        return mvc.perform(delete("/api/reviews/"+id).header("Authorization","Bearer "+who));
+    }
+
     private String token(long user,boolean expired) {
         var now=Instant.now();var p=authentication.getJwt();
         var claims=JwtClaimsSet.builder().issuer(p.getIssuer()).audience(List.of(p.getAudience())).subject(Long.toString(user))

@@ -323,7 +323,20 @@ export async function publishReply(
   }
 }
 
-/** 正式发布、读取及回复；删除仍关闭，预览传输另行注入。 */
+/** 固定开始时凭证；真实归属由服务端校验，不发送可伪造的作者ID。 */
+export async function deleteReview(reviewId: string): Promise<void> {
+  const token = getAccessToken()
+  if (!token) throw new Error('请先登录后删除自己的点评。')
+  try {
+    await httpClient.delete(`/api/reviews/${encodeURIComponent(reviewId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  } catch (reason) {
+    throw new Error(`${toErrorMessage(reason)}。删除未确认，可重试或刷新核对。`, { cause: reason })
+  }
+}
+
+/** 正式发布、读取、回复和本人删除；预览传输另行注入。 */
 export const textReviewGateway: ReviewGateway = {
   supportsPhotos: true,
   supportsReplies: true,
@@ -334,7 +347,5 @@ export const textReviewGateway: ReviewGateway = {
   history: fetchReviewHistory,
   listReplies: fetchReplies,
   reply: publishReply,
-  remove: async () => {
-    throw new Error('点评删除功能尚未开放。')
-  },
+  remove: deleteReview,
 }

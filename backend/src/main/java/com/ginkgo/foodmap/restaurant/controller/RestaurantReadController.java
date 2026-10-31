@@ -28,7 +28,8 @@ public class RestaurantReadController {
     /** 只绑定公开查询字段，避免客户端注入派生offset或其他内部属性。 */
     @InitBinder("restaurantListQuery")
     void bindQuery(WebDataBinder binder) {
-        binder.setAllowedFields("keyword", "category", "tiers", "view", "sort", "hideClosed", "page", "pageSize");
+        binder.setAllowedFields("keyword", "category", "tiers", "view", "sort", "hideClosed",
+                "maxPrice", "maxDistanceMeters", "page", "pageSize");
     }
 
     /** 分类字典无需登录，返回稳定编码及展示顺序。 */

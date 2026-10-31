@@ -6,8 +6,8 @@ import type { ReviewItem } from '../model/review'
 import ReviewEntry from './ReviewEntry.vue'
 
 /** 历史只在独立面板内展示；关闭保留记录和回复草稿，不把旧卡片嵌回主列表。 */
-const props = defineProps<{ restaurantId: string; item: ReviewItem }>()
-const emit = defineEmits<{ photo: [url: string]; refresh: [] }>()
+const props = defineProps<{ restaurantId: string; item: ReviewItem; viewerId?: string }>()
+const emit = defineEmits<{ photo: [url: string]; refresh: []; delete: [item: ReviewItem] }>()
 const gateway = inject(reviewGatewayKey, unavailableReviewGateway)
 const open = ref(false),
   loading = ref(false),
@@ -151,12 +151,19 @@ function refresh() {
             v-for="record in records"
             :key="record.id"
             :item="record"
-            :authenticated="false"
+            :authenticated="!!viewerId"
+            :viewer-id="viewerId"
             :busy="false"
             :reply-texts="{}"
             :show-history="false"
             :replies-enabled="gateway.supportsReplies === true && !!gateway.listReplies"
             @photo="emit('photo', $event)"
+            @delete="
+              (record) => {
+                close()
+                emit('delete', record)
+              }
+            "
           />
           <p v-if="loading" role="status" class="history-status">正在加载历史点评…</p>
           <div v-else-if="error" role="alert" class="history-error">

@@ -55,6 +55,16 @@ afterEach(() => {
 })
 
 describe('text review HTTP integration', () => {
+  it('deletes the exact review with the current credential and propagates failures', async () => {
+    setAccessToken('author-session')
+    const remove = vi.spyOn(httpClient, 'delete').mockResolvedValue({ status: 204 })
+    await textReviewGateway.remove('9007199254740993')
+    expect(remove).toHaveBeenCalledWith('/api/reviews/9007199254740993', {
+      headers: { Authorization: 'Bearer author-session' },
+    })
+    remove.mockRejectedValueOnce(new Error('服务繁忙'))
+    await expect(textReviewGateway.remove('10')).rejects.toThrow('删除未确认')
+  })
   it('maps author groups and all five photos without inferring permissions', async () => {
     const get = vi
       .spyOn(httpClient, 'get')
@@ -146,11 +156,11 @@ describe('text review HTTP integration', () => {
       await expect(publishTextReview(draft())).rejects.toThrow('发布结果无法确认')
     }
   })
-  it('opens replies and keeps delete unavailable', async () => {
+  it('opens replies and requires authentication for deletion', async () => {
     const get = vi.spyOn(httpClient, 'get')
     expect(textReviewGateway.supportsReplies).toBe(true)
     expect(textReviewGateway.listReplies).toBe(fetchReplies)
-    await expect(textReviewGateway.remove('1')).rejects.toThrow('删除功能尚未开放')
+    await expect(textReviewGateway.remove('1')).rejects.toThrow('请先登录')
     expect(get).not.toHaveBeenCalled()
   })
 })

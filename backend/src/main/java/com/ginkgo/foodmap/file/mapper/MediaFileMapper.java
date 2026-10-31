@@ -39,6 +39,10 @@ public interface MediaFileMapper {
     @Update("UPDATE media_files SET status='BOUND',expires_at=NULL,bound_at=CURRENT_TIMESTAMP(6) WHERE id=#{id} AND uploader_user_id=#{owner} AND status='TEMPORARY' AND expires_at>CURRENT_TIMESTAMP(6)")
     int bind(@Param("id") long id,@Param("owner") long owner);
 
+    /** 点评删除事务提交可重试清理意图，云对象交给既有回收任务删除。 */
+    @Update("UPDATE media_files SET status='PENDING_DELETE',expires_at=CURRENT_TIMESTAMP(6) WHERE id=#{id} AND uploader_user_id=#{owner} AND status='BOUND'")
+    int releaseBound(@Param("id") long id,@Param("owner") long owner);
+
     /** 有界批次只扫描清理索引，BOUND文件永远不进入清理候选。 */
     @Select("""
         SELECT id FROM media_files WHERE status IN ('UPLOADING','TEMPORARY','PENDING_DELETE')

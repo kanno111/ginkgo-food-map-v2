@@ -5,8 +5,7 @@ import { useLoginStore } from '@/modules/auth/model/login.store'
 import { authToken } from '@/shared/api/authSession'
 import { fetchRestaurants } from '@/modules/restaurant/api/restaurantApi'
 import type { RestaurantReadModel } from '@/modules/restaurant/model/restaurant.types'
-import { ratingDimensions, tierOf } from '@/modules/restaurant/model/catalog.logic'
-import CupBadge from '@/modules/restaurant/ui/CupBadge.vue'
+import { ratingDimensions } from '@/modules/restaurant/model/catalog.logic'
 import { overall, validBody, reviewGatewayKey, unavailableReviewGateway } from '../model/review'
 import { compressPhoto } from '../model/photos'
 import { useReviewPhotos } from '../model/useReviewPhotos'
@@ -95,7 +94,14 @@ async function open() {
     const all: RestaurantReadModel[] = []
     for (let page = 1; ; page++) {
       const result = await fetchRestaurants(
-        { keyword: '', category: '', tiers: [], view: 'all', sort: 'score', hideClosed: false },
+        {
+          keyword: '',
+          category: '',
+          sort: 'score',
+          hideClosed: false,
+          maxPrice: null,
+          maxDistanceMeters: null,
+        },
         page,
         100,
         controller.signal,
@@ -277,9 +283,7 @@ onUnmounted(close)
           <div class="preview-strip">
             <span
               >本条总分 <b>{{ total.toFixed(2) }}</b></span
-            ><CupBadge :tier="tierOf(total)" /><span
-              >餐厅综合分发布后由后端更新，当前暂不提供预测。</span
-            >
+            ><span>餐厅综合分发布后由后端更新，当前暂不提供预测。</span>
           </div>
           <div v-for="d in ratingDimensions" :key="d.key" class="slider-row">
             <label :for="'review-' + d.key">{{ d.label }}</label
@@ -292,9 +296,7 @@ onUnmounted(close)
               step="0.5"
             /><output>{{ scores[d.key].toFixed(1) }}</output>
           </div>
-          <p class="hint">
-            四项都是0–10分，步进0.5；杯型仅对应本条评分。本条总分 {{ total.toFixed(2) }}
-          </p>
+          <p class="hint">四项都是0–10分，步进0.5。本条总分 {{ total.toFixed(2) }}</p>
           <fieldset>
             <legend>你的判断</legend>
             <button type="button" :aria-pressed="recommended" @click="recommended = true">

@@ -178,7 +178,7 @@ ROUND((taste_score + value_score + service_score + ambience_score) * 0.25, 2)
 | `overall_score_sum` | DECIMAL(16,2)，默认0 | 单条正式总分累计值，不能用四个sum的平均替代 |
 | `updated_at` | TIMESTAMP(6) | 最近同步/重建时间 |
 
-V5的CHECK保证 `recommend_count <= participant_count <= review_count`、每项sum在0至10×participant_count之间；无人参与时所有累计值和推荐数为0。计数溢出必须失败回滚，不能截断。V4为迁移时已有店创建全零行，不生成评价；创建新餐厅时的同事务初始化属于待补应用逻辑。当前先保留主键，不为每种排序盲目增索引。
+V5的CHECK保证 `recommend_count <= participant_count <= review_count`、每项sum在0至10×participant_count之间；无人参与时所有累计值和推荐数为0。计数溢出必须失败回滚，不能截断。V4为迁移时已有店创建全零行，不生成评价。新店继续使用首次发评事务中的惰性初始化，公开读取以LEFT JOIN兼容缺失零行，GET不补写统计。当前先保留主键，不为每种排序盲目增索引。
 
 ### V4到V5的实际升级
 
@@ -186,7 +186,7 @@ V5保留已执行V1–V4，给统计表新增participant_count，并为reviews�
 
 本地开发库已升级为V5，26家餐厅各有统计行，评价人数和条数仍为0；再次迁移执行0项，原有业务表数据指纹不变。独立MySQL 8.4测试覆盖空库、V3/V4升级、同人多评、同时间ID顺序、缺行及约束。不代表生产库已升级。
 
-新增统计行由发布事务按需初始化，兼容在V5后由旧版餐厅服务创建的店。日常发布在父店锁内做差量更新；餐厅创建时主动初始化及统计读取展示留到B步。当前产品计分规则见需求，事务细节见后端计划，真实HTTP协议见接口文档第14节。
+新增统计行由发布事务按需初始化，兼容在V5后由旧版餐厅服务创建的店。日常发布在父店锁内做差量更新。B2后端已实现：目录/详情及管理回执复用统计投影，均分为各累计值除以participant_count，NULLIF区分无人和真实0分，杯型用累计分与人数乘阈值精确比较；全量筛选排序在LIMIT前执行，COUNT、结果和标签保持同一只读快照。本轮不新增表或迁移。前端人数和统计刷新已接通，前端不再展示杯型，运行时重建服务也未实现。当前产品计分规则见需求，事务细节见后端计划，真实HTTP协议见接口文档第11、14节。
 
 ## 8. 应用层协作边界
 
@@ -251,3 +251,8 @@ mvn test '-Dreview.integration=true' '-Dtest=ReviewReadApiIntegrationTest,Review
 每段在同一REPEATABLE_READ只读快照内验证父店、当前代表、锚点、正文、照片与公开署名。跨段不保持长事务；currentReviewId发生变化时，前端丢弃已载历史并刷新当前页。该机制不会主动推送新评，检测发生在下一次历史请求；已加载记录直到手动刷新或再次请求前仍可能是旧视图。
 
 2026-10-30在独立MySQL8.4.0以30作者×50条同时间记录验证EXPLAIN/ANALYZE，报告由ReviewReadApiIntegrationTest生成至backend/target/review-history-explain.txt。该小样本优化器选择uk_reviews_author_request定位50行并过滤/排序后LIMIT6，未固定使用V5复合索引；复合索引只是可选访问路径，不能宣称零排序或常数开销。没有基于该样本强制索引；更大规模和多店分布应另测。未测吞吐量，也未宣称性能提升。
+
+
+## V8：独立发布及删除回执
+
+review_request_receipts主键(author_user_id,client_request_id)，review_id唯一，保留restaurant_id、deleted_at。迁移回填现有reviews，不改V1–V7。新发布与回执插入同事务；删除标记回执后硬删内容，无指向reviews的外键。持续保留最小防重材料，不保存正文照片，不自动过期；账号清理另定策略。父店锁统一串行化发评、回复、删评和删店；评分差量支持条数正负增量。通过file应用服务改变媒体状态，不跨模块访问媒体表。

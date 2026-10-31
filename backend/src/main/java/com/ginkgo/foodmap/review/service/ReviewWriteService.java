@@ -29,6 +29,7 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class ReviewWriteService {
     private final ReviewWriteMapper mapper;
+    private final com.ginkgo.foodmap.review.mapper.ReviewDeleteMapper deletion;
     private final RestaurantReviewApplicationService restaurants;
     private final CurrentActorService actors;
     private final PlatformTransactionManager transactions;
@@ -57,6 +58,8 @@ public class ReviewWriteService {
 
     private ReviewPublishVo publishTransaction(ReviewEntity row,java.util.List<Long> photoIds) {
         restaurants.lockVisible(row.getRestaurantId());
+        if (deletion.deletedRequest(row.getAuthorUserId(), row.getClientRequestId()) != 0)
+            throw new BusinessException(ReviewErrorCode.REQUEST_DELETED);
         var existing = mapper.request(row.getAuthorUserId(), row.getClientRequestId());
         if (existing != null) {
             if (!sameContent(existing,row) || !photos.ids(existing.getId()).equals(photoIds)) throw new BusinessException(ReviewErrorCode.REQUEST_CONFLICT);
@@ -66,6 +69,8 @@ public class ReviewWriteService {
         row.setCreatedAt(previous==null ? null : previous.getCreatedAt());
         row.setId(null);
         mapper.insert(row);
+        // 独立回执唯一键使跨店发布/删除竞争仍然安全；重复键由外层完整事务重试。
+        deletion.record(row);
         // 必须加入当前点评事务；任一图片失效或归属错误，点评、图片及评分一起回滚。
         media.bind(photoIds,row.getAuthorUserId());
         for(int position=0;position<photoIds.size();position++)photos.insert(row.getId(),position,photoIds.get(position));

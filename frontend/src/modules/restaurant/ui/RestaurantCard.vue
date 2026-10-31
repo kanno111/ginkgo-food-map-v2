@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from 'vue'
 import { useRestaurantReviewPreview } from '@/modules/review'
-import { campusDistance, priceLabel, tierOf } from '../model/catalog.logic'
+import { campusDistance, priceLabel } from '../model/catalog.logic'
 import type { RestaurantReadModel } from '../model/restaurant.types'
-import CupBadge from './CupBadge.vue'
 
 const props = defineProps<{ restaurant: RestaurantReadModel }>()
 const { photo, count, state } = useRestaurantReviewPreview(toRef(() => props.restaurant.id))
@@ -52,20 +51,12 @@ const distance = computed(() => campusDistance(props.restaurant))
     <div class="card-copy">
       <div class="card-top">
         <span class="category-label">{{ restaurant.category }}</span>
-        <CupBadge :tier="tierOf(restaurant.score)" compact />
       </div>
       <h3>{{ restaurant.name }}<span class="card-arrow" aria-hidden="true">↗</span></h3>
       <p class="card-rating">
-        {{ restaurant.score === null ? '待评级' : `${restaurant.score.toFixed(1)}分` }}
+        {{ restaurant.score === null ? '暂无评分' : `${restaurant.score.toFixed(1)}分` }}
         <small
-          >·
-          {{
-            count === null
-              ? state === 'error'
-                ? '评价数暂不可用'
-                : '评价数待读取'
-              : `${count} 条评价`
-          }}</small
+          >· {{ restaurant.participantCount }} 人评分 · {{ restaurant.reviewCount }} 条点评</small
         >
       </p>
       <p class="card-address">{{ restaurant.address || '地址待补充' }}</p>

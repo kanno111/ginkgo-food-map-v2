@@ -26,6 +26,7 @@ describe('review interactions matching the original site', () => {
   }
   const review: ReviewItem = {
     id: '10',
+    authorId: '1',
     username: '测试社员',
     createdAt: '2026-10-29T10:00:00+08:00',
     scores: { taste: 8, value: 8, service: 8, ambience: 7.5 },
@@ -50,16 +51,14 @@ describe('review interactions matching the original site', () => {
     host = document.createElement('div')
     document.body.append(host)
     gateway = {
-      list: vi
-        .fn()
-        .mockResolvedValue({
-          records: [review],
-          page: 1,
-          pageSize: 8,
-          totalGroups: 1,
-          totalReviews: 1,
-          totalPages: 1,
-        }),
+      list: vi.fn().mockResolvedValue({
+        records: [review],
+        page: 1,
+        pageSize: 8,
+        totalGroups: 1,
+        totalReviews: 1,
+        totalPages: 1,
+      }),
       publish: vi.fn().mockRejectedValue(new Error('网络失败')),
       reply: vi.fn().mockRejectedValue(new Error('回复网络失败')),
       remove: vi.fn().mockResolvedValue(undefined),
@@ -316,13 +315,50 @@ describe('review interactions matching the original site', () => {
     button.click()
     await settle()
     expect(gateway.remove).not.toHaveBeenCalled()
-    const confirm = [...host.querySelectorAll('button')].find(
+    const confirm = [...document.querySelectorAll('button')].find(
       (el) => el.textContent === '确认删除',
     )!
     confirm.click()
     await settle()
     expect(gateway.remove).toHaveBeenCalledWith('10')
     expect(gateway.list).toHaveBeenCalledTimes(2)
+  })
+  it('shows deletion only for the authenticated author, not matching names or flags', async () => {
+    await mount(ReviewPanel, { restaurantId: '1' })
+    const hasDelete = () =>
+      [...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === '删除评价')
+    expect(hasDelete()).toBe(false)
+    login()
+    await settle()
+    expect(hasDelete()).toBe(true)
+    useLoginStore(pinia).user = { id: 2, username: review.username, roles: ['ADMIN'] }
+    await settle()
+    expect(hasDelete()).toBe(false)
+    clearAccessToken()
+    await settle()
+    expect(hasDelete()).toBe(false)
+  })
+  it('keeps failed deletion retryable inside confirmation and cancellation does not delete', async () => {
+    login()
+    vi.mocked(gateway.remove).mockRejectedValueOnce(new Error('暂时不可用'))
+    await mount(ReviewPanel, { restaurantId: '1' })
+    const click = async (name: string) => {
+      ;[...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent?.trim() === name)!
+        .click()
+      await settle()
+    }
+    await click('删除评价')
+    await click('取消')
+    expect(gateway.remove).not.toHaveBeenCalled()
+    await click('删除评价')
+    await click('确认删除')
+    expect(document.querySelector('dialog[open]')?.textContent).toContain('暂时不可用')
+    expect(host.textContent).toContain(review.body)
+    await click('确认删除')
+    expect(gateway.remove).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('dialog[open]')).toBeNull()
+    expect(vi.mocked(gateway.list).mock.calls.at(-1)?.[2]).toBe(1)
   })
   it('paginates author groups and resets to page one on refresh or publication', async () => {
     gateway.supportsReplies = false
@@ -370,7 +406,9 @@ describe('review interactions matching the original site', () => {
       .mockRejectedValueOnce(new Error('网络失败'))
       .mockResolvedValueOnce(data(2))
     await mount(ReviewPanel, { restaurantId: '1' })
-    ;[...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === '下一页点评')!.click()
+    ;[...host.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === '下一页点评')!
+      .click()
     await settle()
     expect(host.querySelector('[role=alert]')?.textContent).toContain('网络失败')
     expect(host.querySelector('.empty')).toBeNull()

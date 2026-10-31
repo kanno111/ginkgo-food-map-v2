@@ -51,12 +51,13 @@ beforeEach(() => {
     },
   })
 })
-async function mount(history: ReturnType<typeof vi.fn>) {
+async function mount(history: ReturnType<typeof vi.fn>, viewerId?: string, onDelete = vi.fn()) {
   const refresh = vi.fn()
   host = document.createElement('div')
   document.body.append(host)
   app = createApp({
-    render: () => h(ReviewHistory, { restaurantId: '1', item, onRefresh: refresh }),
+    render: () =>
+      h(ReviewHistory, { restaurantId: '1', item, viewerId, onDelete, onRefresh: refresh }),
   })
   app.provide(reviewGatewayKey, {
     ...unavailableReviewGateway,
@@ -80,6 +81,16 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'close')
 })
 describe('lazy review history panel', () => {
+  it('allows the owner to delete the exact historical record after closing the history dialog', async () => {
+    const remove = vi.fn()
+    await mount(vi.fn().mockResolvedValue(result('9')), '22', remove)
+    await toggle(true)
+    button('删除评价').click()
+    await settle()
+    expect(panel().open).toBe(false)
+    expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: '9', authorId: '22' }))
+    expect(document.documentElement.style.overflow).toBe('')
+  })
   it('waits for opening, appends more and retains loaded records after reopening', async () => {
     const history = vi
       .fn()

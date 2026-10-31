@@ -16,7 +16,7 @@ import cover from '@/shared/assets/ginkgo-cover.jpg'
       </figure>
       <div class="footer-links">
         <RouterLink to="/previews/review-history">多次点评展示预览 →</RouterLink
-        ><RouterLink to="/scoring-guide">杯型评分说明 →</RouterLink>
+        ><RouterLink to="/scoring-guide">评分说明 →</RouterLink>
       </div>
     </footer>
   </div>

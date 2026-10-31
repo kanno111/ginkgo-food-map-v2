@@ -4,7 +4,9 @@
     <select id="selectManagementById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantManagementEntity">
         SELECT <include refid="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper.publicColumns"/>,
             r.created_by, r.updated_by, r.deleted_at
-        FROM restaurants r JOIN restaurant_categories c ON c.code = r.category_code WHERE r.id = #{id}
+        <!-- 管理回执复用公开统计字段，保存餐厅资料后不会把已有分数覆盖为空态。 -->
+        <include refid="com.ginkgo.foodmap.restaurant.mapper.RestaurantCatalogMapper.catalogFrom"/>
+        WHERE r.id = #{id}
     </select>
 
     <select id="lockById" resultType="com.ginkgo.foodmap.restaurant.entity.RestaurantManagementEntity">

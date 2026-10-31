@@ -20,7 +20,7 @@ public interface RestaurantReviewStatisticsMapper {
 
     /** 一条原子UPDATE同时改变条数、人数与全部累计值，数据库CHECK约束兜底。 */
     @Update("""
-        UPDATE restaurant_review_statistics SET review_count=review_count+1,
+        UPDATE restaurant_review_statistics SET review_count=review_count+#{delta.reviews},
           participant_count=participant_count+#{delta.participants},
           recommend_count=recommend_count+#{delta.recommendations},
           taste_sum=taste_sum+#{delta.taste}, value_sum=value_sum+#{delta.value},

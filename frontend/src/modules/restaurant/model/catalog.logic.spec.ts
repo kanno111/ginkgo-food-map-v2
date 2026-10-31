@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { campusDistance, filterRestaurants, priceLabel, tierOf } from './catalog.logic'
+import { campusDistance, filterRestaurants, priceLabel } from './catalog.logic'
 import { previewRestaurants } from './catalog.preview'
 import type { CatalogFilters, RestaurantReadModel } from './restaurant.types'
 
@@ -22,35 +22,15 @@ function filters(overrides: Partial<CatalogFilters> = {}): CatalogFilters {
   return {
     keyword: '',
     category: '',
-    tiers: [],
     sort: 'score',
-    view: 'all',
     hideClosed: false,
+    maxPrice: null,
+    maxDistanceMeters: null,
     ...overrides,
   }
 }
 
 describe('restaurant reading rules', () => {
-  it.each([
-    [null, 'none'],
-    [0, 'small'],
-    [4.999, 'small'],
-    [5, 'medium'],
-    [6.199, 'medium'],
-    [6.2, 'large'],
-    [7.399, 'large'],
-    [7.4, 'super'],
-    [8.55, 'super'],
-    [8.599, 'super'],
-    [8.6, 'bucket'],
-    [10, 'bucket'],
-    [NaN, 'none'],
-    [-1, 'none'],
-    [11, 'none'],
-  ] as const)('classifies raw score %s as %s without display rounding', (score, tier) => {
-    expect(tierOf(score)).toBe(tier)
-  })
-
   it('searches across name, address, category and tags without case sensitivity', () => {
     const items = [
       candidate('a', null, {
@@ -66,25 +46,7 @@ describe('restaurant reading rules', () => {
     expect(filterRestaurants(items, filters({ keyword: '找不到' }))).toEqual([])
   })
 
-  it('keeps unrated restaurants separate from recommendations and pitfalls', () => {
-    const items = [
-      candidate('unrated', null),
-      candidate('pitfall', 0),
-      candidate('middle', 6.19),
-      candidate('good', 6.2),
-    ]
-    expect(filterRestaurants(items, filters({ view: 'recommended' })).map((r) => r.id)).toEqual([
-      'good',
-    ])
-    expect(filterRestaurants(items, filters({ view: 'pitfall' })).map((r) => r.id)).toEqual([
-      'pitfall',
-    ])
-    expect(
-      filterRestaurants(items, filters({ tiers: ['none', 'small'] })).map((r) => r.id),
-    ).toEqual(['pitfall', 'unrated'])
-  })
-
-  it('combines category, keyword, cup tiers and closure filters', () => {
+  it('combines category, keyword and closure filters', () => {
     const items = [
       candidate('a', 8, { category: '火锅', name: '建设路火锅', closed: true }),
       candidate('b', 8, { category: '火锅', name: '建设路火锅二店' }),
@@ -93,7 +55,7 @@ describe('restaurant reading rules', () => {
     expect(
       filterRestaurants(
         items,
-        filters({ category: '火锅', keyword: '建设路', tiers: ['super'], hideClosed: true }),
+        filters({ category: '火锅', keyword: '建设路', hideClosed: true }),
       ).map((r) => r.id),
     ).toEqual(['b'])
   })

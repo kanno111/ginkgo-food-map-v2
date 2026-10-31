@@ -38,7 +38,7 @@ const router = createRouter({
       path: '/scoring-guide',
       name: 'scoring-guide',
       component: () => import('@/pages/scoring/ScoringGuidePage.vue'),
-      meta: { title: '杯型评分说明' },
+      meta: { title: '评分说明' },
     },
     {
       path: '/password-reset',

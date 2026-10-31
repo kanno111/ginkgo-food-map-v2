@@ -24,6 +24,7 @@ export interface ReviewItem {
   recommended: boolean
   body: string
   photos: ReviewPhoto[]
+  /** 独立预览的演示开关；正式入口比较已认证账号ID与作者ID，授权仍由后端完成。 */
   canDelete: boolean
   replies: { id: string; username: string; body: string; createdAt: string }[]
 }
