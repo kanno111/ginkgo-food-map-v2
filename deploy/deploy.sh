@@ -54,7 +54,9 @@ activate() {
 }
 
 healthy() {
-  python3 "$incoming/healthcheck.py" --commit "$1" --attempts 12 --delay 3 --timeout 15
+  # 小规格服务器冷启动及Flyway升级可能超过原先约33秒的重试窗口；
+  # 最多检查40次，间隔3秒，给应用约两分钟启动，同时保留超时失败与回滚。
+  python3 "$incoming/healthcheck.py" --commit "$1" --attempts 40 --delay 3 --timeout 15
 }
 
 # 切换之后失败时尝试恢复上一版程序；Flyway 已执行的数据库迁移不会自动撤销。
