@@ -1,0 +1,322 @@
+<view class="page detail-page">
+  <view class="ambient">
+    <view class="ambient-blob ambient-a"></view>
+    <view class="ambient-blob ambient-b"></view>
+    <view class="ambient-blob ambient-c"></view>
+  </view>
+
+  <view wx:if="{{loading}}" class="empty-state">正在加载店铺详情…</view>
+  <view wx:elif="{{errorMessage}}" class="empty-state">
+    <view class="error-text">{{errorMessage}}</view>
+    <view class="ghost-button detail-retry" bindtap="retry">重新加载</view>
+  </view>
+
+  <block wx:elif="{{restaurant}}">
+    <swiper
+      wx:if="{{albumUrls.length}}"
+      class="album-swiper"
+      indicator-dots
+      indicator-color="rgba(255,255,255,0.45)"
+      indicator-active-color="#e9b949"
+      circular
+    >
+      <swiper-item wx:for="{{albumUrls}}" wx:key="*this">
+        <image
+          class="album-image"
+          src="{{item}}"
+          mode="aspectFill"
+          data-url="{{item}}"
+          bindtap="previewAlbum"
+        />
+      </swiper-item>
+    </swiper>
+    <view wx:else class="album-empty">{{albumEmptyText}}</view>
+    <view wx:if="{{albumNextCursor}}" class="album-more" bindtap="loadAlbumMore">
+      {{albumLoadingMore ? '正在加载照片…' : '加载更多照片'}}
+    </view>
+
+    <view class="card summary-card">
+      <view class="summary-top">
+        <view class="flex-1">
+          <view class="detail-name">{{restaurant.name}}</view>
+          <view class="detail-sub">
+            {{restaurant.typeLabel}} · {{restaurant.categoryLabel}}<text wx:if="{{restaurant.businessText}}"> · {{restaurant.businessText}}</text>
+          </view>
+        </view>
+        <view class="summary-actions">
+          <view
+            wx:if="{{!isWindow}}"
+            class="favorite-button {{favorited ? 'active' : ''}}"
+            bindtap="toggleFavorite"
+          >{{favoriteBusy ? '处理中' : (favorited ? '已收藏' : '收藏')}}</view>
+          <view wx:if="{{!isCanteen}}" class="write-button" bindtap="writeReview">写点评</view>
+          <view wx:if="{{!isWindow}}" class="correction-button" bindtap="openCorrection">补充 / 纠错</view>
+        </view>
+      </view>
+
+      <view wx:if="{{favoriteHint}}" class="error-text favorite-hint">{{favoriteHint}}</view>
+
+      <view class="summary-rating">
+        <view class="summary-score">{{restaurant.scoreText}}</view>
+        <view class="flex-1">
+          <view class="summary-count">{{restaurant.reviewCountText}}</view>
+          <view class="muted summary-meta">
+            {{restaurant.participantCountText}}<text wx:if="{{restaurant.recommendText}}"> · 推荐率 {{restaurant.recommendText}}</text>
+          </view>
+        </view>
+        <view class="summary-price">{{restaurant.priceText}}</view>
+      </view>
+
+      <view class="dimension-grid">
+        <view wx:for="{{restaurant.dimensions}}" wx:key="key" class="dimension-item">
+          <view class="dimension-value">{{item.value}}</view>
+          <view class="dimension-label">{{item.label}}</view>
+        </view>
+      </view>
+
+      <view class="divider info-divider"></view>
+
+      <view class="info-row">
+        <text class="info-label">地址</text>
+        <text class="info-value">{{restaurant.addressText}}</text>
+      </view>
+      <view wx:if="{{isWindow && windowDescription}}" class="info-row">
+        <text class="info-label">介绍</text>
+        <text class="info-value">{{windowDescription}}</text>
+      </view>
+      <view wx:if="{{restaurant.distanceText}}" class="info-row">
+        <text class="info-label">距离</text>
+        <text class="info-value">{{restaurant.distanceText}}</text>
+      </view>
+      <view wx:if="{{restaurant.supportsText}}" class="info-row">
+        <text class="info-label">用餐</text>
+        <text class="info-value">{{restaurant.supportsText}}</text>
+      </view>
+
+      <view wx:if="{{restaurant.tags.length}}" class="tag-row">
+        <text wx:for="{{restaurant.tags}}" wx:key="*this" class="tag">{{item}}</text>
+      </view>
+
+      <view class="map-tip">{{isWindow ? '窗口位于所属食堂内，可按食堂地址前往。' : '地图定位与导航将在后续步骤接入，当前可先通过地址前往。'}}</view>
+    </view>
+
+    <view wx:if="{{isCanteen}}" class="section">
+      <view class="section-head">
+        <view class="section-title">食堂窗口</view>
+        <view class="section-meta">{{windows.length}} 个窗口</view>
+      </view>
+      <view wx:if="{{windows.length}}" class="card window-card">
+        <view
+          wx:for="{{windows}}"
+          wx:key="id"
+          class="window-row"
+          data-id="{{item.id}}"
+          bindtap="openWindow"
+        >
+          <view class="window-cover">
+            <image wx:if="{{item.coverUrl}}" class="window-image" src="{{item.coverUrl}}" mode="aspectFill" lazy-load />
+            <view wx:else class="window-placeholder">窗口</view>
+          </view>
+          <view class="flex-1">
+            <view class="window-name">{{item.name}}</view>
+            <view class="window-meta">{{item.floorText}} · {{item.priceText}}</view>
+            <view class="window-score">{{item.scoreText}} <text class="muted">{{item.reviewCountText}}</text></view>
+          </view>
+          <view wx:if="{{item.closed}}" class="window-closed">停业</view>
+          <view wx:else class="window-arrow">›</view>
+        </view>
+      </view>
+      <view wx:else class="card empty-window">窗口信息暂未补充。</view>
+    </view>
+
+    <view class="section">
+      <view class="section-head">
+        <view class="section-title">点评</view>
+        <picker
+          mode="selector"
+          range="{{reviewSortLabels}}"
+          value="{{reviewSortIndex}}"
+          bindchange="onReviewSortChange"
+        >
+          <view class="sort-picker">{{reviewSortLabels[reviewSortIndex]}} ▾</view>
+        </picker>
+      </view>
+      <view class="section-meta">{{reviewTotalReviews}} 条点评 · {{reviewTotalGroups}} 位作者</view>
+
+      <view wx:if="{{reviewLoading && !reviews.length}}" class="card empty-state">正在加载点评…</view>
+      <view wx:elif="{{reviewError}}" class="card empty-state">
+        <view class="error-text">{{reviewError}}</view>
+        <view class="ghost-button retry-reviews" bindtap="retryReviews">重新加载</view>
+      </view>
+      <view wx:elif="{{!reviews.length}}" class="card empty-state">还没有点评，欢迎后续在小程序发布第一条。</view>
+      <view wx:else class="review-list">
+        <view wx:for="{{reviews}}" wx:key="id" class="card review-card">
+          <view class="review-head">
+            <view class="review-identity" data-index="{{index}}" bindtap="openAuthor">
+              <view class="avatar">{{item.avatarText}}</view>
+              <view class="flex-1">
+                <view class="review-author">
+                  {{item.username}}<text wx:if="{{item.authorLevelText}}" class="author-level"> {{item.authorLevelText}}</text>
+                </view>
+                <view class="review-date">
+                  {{item.createdAtText}}<text wx:if="{{item.historyText}}"> · {{item.historyText}}</text>
+                </view>
+              </view>
+            </view>
+            <view class="review-score">{{item.overallScoreText}}</view>
+          </view>
+          <view class="review-badge {{item.recommended ? 'recommend' : 'avoid'}}">{{item.recommendationText}}</view>
+          <view class="review-body">{{item.body}}</view>
+          <view wx:if="{{item.photoUrls.length}}" class="review-photos">
+            <image
+              wx:for="{{item.photoUrls}}"
+              wx:for-item="photo"
+              wx:for-index="photoIndex"
+              wx:key="*this"
+              class="review-photo"
+              src="{{photo}}"
+              mode="aspectFill"
+              lazy-load
+              data-review-index="{{index}}"
+              data-url="{{photo}}"
+              bindtap="previewReviewPhoto"
+            />
+          </view>
+
+          <view class="review-actions">
+            <view
+              class="review-action {{item.liked ? 'active' : ''}} {{item.likeBusy ? 'disabled' : ''}}"
+              data-index="{{index}}"
+              bindtap="toggleReviewLike"
+            >
+              <text class="action-heart">♥</text>
+              <text wx:if="{{item.likeKnown && item.likeAvailable}}">{{item.likeCount}}</text>
+              <text wx:else>赞</text>
+            </view>
+            <view class="review-action" data-index="{{index}}" bindtap="toggleReplies">
+              {{item.repliesOpen ? '收起回复' : '回复'}}
+            </view>
+            <view
+              wx:if="{{item.canReport}}"
+              class="review-action"
+              data-review-index="{{index}}"
+              bindtap="openReport"
+            >举报</view>
+          </view>
+
+          <view wx:if="{{item.repliesOpen}}" class="reply-block">
+            <view wx:if="{{item.repliesLoading && !item.replies.length}}" class="muted reply-tip">正在加载回复…</view>
+            <view wx:elif="{{item.repliesError}}" class="reply-tip">
+              <text class="error-text">{{item.repliesError}}</text>
+              <text class="reply-link" data-index="{{index}}" bindtap="retryReplies">重试</text>
+            </view>
+            <view wx:elif="{{!item.replies.length}}" class="muted reply-tip">还没有回复。</view>
+            <view
+              wx:for="{{item.replies}}"
+              wx:for-item="reply"
+              wx:for-index="replyIndex"
+              wx:key="id"
+              class="reply-row"
+            >
+              <view class="reply-head">
+                <text class="reply-author">{{reply.username}}</text>
+                <text class="reply-date">{{reply.createdAtText}}</text>
+              </view>
+              <view class="reply-body">{{reply.body}}</view>
+              <view class="reply-actions">
+                <view
+                  class="reply-action {{reply.liked ? 'active' : ''}} {{reply.likeBusy ? 'disabled' : ''}}"
+                  data-review-index="{{index}}"
+                  data-reply-index="{{replyIndex}}"
+                  bindtap="toggleReplyLike"
+                >
+                  ♥<text wx:if="{{reply.likeKnown && reply.likeAvailable}}"> {{reply.likeCount}}</text>
+                </view>
+                <view
+                  wx:if="{{reply.canDelete}}"
+                  class="reply-action danger"
+                  data-review-index="{{index}}"
+                  data-reply-index="{{replyIndex}}"
+                  bindtap="deleteReply"
+                >删除</view>
+                <view
+                  wx:if="{{reply.canReport}}"
+                  class="reply-action"
+                  data-review-index="{{index}}"
+                  data-reply-index="{{replyIndex}}"
+                  bindtap="openReport"
+                >举报</view>
+              </view>
+            </view>
+
+            <view
+              wx:if="{{item.repliesHasMore}}"
+              class="reply-more"
+              data-index="{{index}}"
+              bindtap="loadMoreReplies"
+            >{{item.repliesLoading ? '加载中…' : '查看更多回复'}}</view>
+
+            <view wx:if="{{item.replyComposerOpen}}" class="reply-composer">
+              <textarea
+                class="reply-textarea"
+                value="{{item.replyDraft}}"
+                data-index="{{index}}"
+                maxlength="200"
+                placeholder="友善回复，最多200字"
+                bindinput="onReplyInput"
+              />
+              <view class="reply-composer-foot">
+                <text class="muted">{{item.replyDraftLength}}/200</text>
+                <view class="mini-button" data-index="{{index}}" bindtap="submitReply">
+                  {{item.replySubmitting ? '发送中…' : '发送'}}
+                </view>
+              </view>
+              <view wx:if="{{item.replyError}}" class="error-text">{{item.replyError}}</view>
+            </view>
+            <view wx:elif="{{!item.repliesLoading}}" class="reply-open" data-index="{{index}}" bindtap="openReplyComposer">写回复</view>
+          </view>
+        </view>
+      </view>
+
+      <view
+        wx:if="{{reviews.length && hasMoreReviews}}"
+        class="ghost-button load-more-reviews"
+        bindtap="loadMoreReviews"
+      >{{reviewLoading ? '加载中…' : '加载更多点评'}}</view>
+      <view wx:elif="{{reviews.length}}" class="list-end">已展示全部点评</view>
+
+      <view wx:if="{{interactionHint}}" class="error-text interaction-hint">{{interactionHint}}</view>
+      <view class="compose-note">请友善互动；举报内容由管理员核查后处理，不会立即隐藏原文。</view>
+    </view>
+  </block>
+
+  <view wx:if="{{reportOpen}}" class="report-mask" catchtap="closeReport">
+    <view class="card report-sheet" catchtap="stopPropagation">
+      <view class="report-title">举报{{reportTargetLabel}}</view>
+      <view class="muted report-sub">举报不会立即隐藏内容，管理员核查后处理。</view>
+      <picker
+        mode="selector"
+        range="{{reportReasonLabels}}"
+        value="{{reportReasonIndex}}"
+        bindchange="onReportReasonChange"
+      >
+        <view class="field-shell report-picker">原因：{{reportReasonLabels[reportReasonIndex]}} ▾</view>
+      </picker>
+      <textarea
+        class="report-textarea"
+        value="{{reportDetail}}"
+        maxlength="200"
+        placeholder="补充说明（选填，最多200字）"
+        bindinput="onReportDetailInput"
+      />
+      <view class="muted report-count">{{reportDetailLength}}/200</view>
+      <view wx:if="{{reportError}}" class="error-text">{{reportError}}</view>
+      <view class="report-actions">
+        <view class="ghost-button flex-1" bindtap="closeReport">取消</view>
+        <view class="primary-button flex-1" bindtap="submitReport">
+          {{reportSubmitting ? '提交中…' : '提交举报'}}
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

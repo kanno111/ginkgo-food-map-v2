@@ -1,0 +1,126 @@
+<view class="page detail-page">
+  <view class="ambient">
+    <view class="ambient-blob ambient-a"></view>
+    <view class="ambient-blob ambient-b"></view>
+    <view class="ambient-blob ambient-c"></view>
+  </view>
+
+  <view wx:if="{{!loggedIn}}" class="card content-state">
+    <view class="state-title">登录后查看投稿详情</view>
+    <view class="state-copy">申请内容与附图只对提交人开放。</view>
+    <view class="primary-button state-action" bindtap="login">去登录</view>
+  </view>
+
+  <view wx:elif="{{loading}}" class="card content-state">
+    <view class="state-copy">正在加载…</view>
+  </view>
+
+  <view wx:elif="{{errorMessage}}" class="card content-state">
+    <view class="state-title">读取失败</view>
+    <view class="state-copy">{{errorMessage}}</view>
+    <view class="ghost-button state-action" bindtap="load">重新加载</view>
+  </view>
+
+  <block wx:elif="{{detail}}">
+    <view class="card detail-head">
+      <view class="detail-head-top">
+        <view class="detail-name">{{detail.name}}</view>
+        <view class="status-badge status-{{detail.statusClass}}">{{detail.statusLabel}}</view>
+      </view>
+      <view class="detail-meta">{{detail.typeLabel}} · 申请 #{{detail.id}}</view>
+      <view wx:if="{{detail.previousRequestText}}" class="detail-meta">{{detail.previousRequestText}}</view>
+      <view class="detail-timeline">
+        <text>提交于 {{detail.createdText}}</text>
+        <text wx:if="{{detail.reviewedText}}"> · 审核于 {{detail.reviewedText}}</text>
+        <text wx:if="{{detail.withdrawnText}}"> · 撤回于 {{detail.withdrawnText}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{detail.rejectReason}}" class="card reject-card">
+      <view class="section-title">驳回原因</view>
+      <view class="reject-text">{{detail.rejectReason}}</view>
+    </view>
+
+    <view class="card">
+      <view class="section-title">提交内容</view>
+      <view wx:for="{{detail.proposed}}" wx:key="label" class="field-row">
+        <view class="field-label">{{item.label}}</view>
+        <view class="field-value">{{item.value}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{detail.approved.length}}" class="card">
+      <view class="section-title">审核通过内容</view>
+      <view wx:for="{{detail.approved}}" wx:key="label" class="field-row">
+        <view class="field-label">{{item.label}}</view>
+        <view class="field-value">{{item.value}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{detail.photoPositions.length}}" class="card">
+      <view class="section-title">附图（{{detail.photoPositions.length}} 张）</view>
+      <view class="photo-grid">
+        <view
+          wx:for="{{photos}}"
+          wx:key="position"
+          class="photo-cell"
+          data-index="{{index}}"
+          bindtap="previewPhoto"
+        >
+          <image wx:if="{{item.path}}" class="photo-image" src="{{item.path}}" mode="aspectFill" />
+          <view wx:elif="{{item.loading}}" class="photo-state">加载中…</view>
+          <view wx:else class="photo-state photo-error">
+            <text>{{item.error || '读取失败'}}</text>
+            <text class="photo-retry" catchtap="retryPhoto" data-index="{{index}}">重试</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{detail.targetAvailable && detail.restaurantId}}" class="primary-button detail-action" bindtap="openRestaurant">
+      查看店铺
+    </view>
+
+    <view wx:if="{{detail.canEdit || detail.canResubmit}}" class="card action-card">
+      <view class="section-title">申请操作</view>
+      <view wx:if="{{detail.canEdit}}" class="action-copy">
+        修改会整体替换当前待审内容并重新进入审核队列。原申请附图不会自动保留，需要重新选择上传。
+      </view>
+      <view wx:elif="{{detail.canResubmit}}" class="action-copy">
+        重新提交会基于当前内容创建新的待审申请，原驳回记录与原因保持不变。附图需要重新选择上传。
+      </view>
+      <view
+        wx:if="{{detail.status === 'REJECTED' && detail.requestType === 'UPDATE' && !detail.targetAvailable}}"
+        class="field-hint"
+      >原店铺已不可用，无法重新提交资料纠错。</view>
+      <view class="action-row">
+        <view
+          wx:if="{{detail.canEdit}}"
+          class="primary-button action-button {{busy ? 'is-disabled' : ''}}"
+          bindtap="editApplication"
+        >修改内容</view>
+        <view
+          wx:if="{{detail.canEdit}}"
+          class="ghost-button action-button action-danger {{busy ? 'is-disabled' : ''}}"
+          bindtap="withdraw"
+        >{{busy ? '处理中…' : '撤回申请'}}</view>
+        <view
+          wx:if="{{detail.canResubmit}}"
+          class="primary-button action-button {{busy ? 'is-disabled' : ''}}"
+          bindtap="resubmitApplication"
+        >修改后重新提交</view>
+      </view>
+      <view wx:if="{{actionError}}" class="error-text action-error">{{actionError}}</view>
+    </view>
+
+    <view wx:if="{{detail.canEdit || detail.canResubmit}}" class="readonly-note">
+      修改与重提都只影响申请记录，审核通过前不会改动公开店铺资料。
+    </view>
+    <view wx:elif="{{detail.status === 'APPROVED'}}" class="readonly-note">
+      该申请已审核通过并更新公开资料，不能再次修改。
+    </view>
+    <view wx:elif="{{detail.status === 'WITHDRAWN'}}" class="readonly-note">
+      该申请已由你撤回，不可恢复；如需更新资料请重新提交申请。
+    </view>
+  </block>
+</view>

@@ -1,0 +1,102 @@
+<view class="page tab-page account-page">
+  <view class="ambient">
+    <view class="ambient-blob ambient-a"></view>
+    <view class="ambient-blob ambient-b"></view>
+    <view class="ambient-blob ambient-c"></view>
+  </view>
+
+  <view class="account-hero">
+    <view class="account-avatar">{{initial}}</view>
+    <view class="account-copy">
+      <view class="account-name">{{loggedIn ? username : '未登录'}}</view>
+      <view class="account-sub">{{loggedIn ? roleText : '登录后可收藏店铺并管理个人内容'}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{!loggedIn}}" class="card account-card">
+    <view class="account-title">登录泥电美食地图</view>
+    <view class="account-copy-text">
+      小程序沿用网页端账号体系，使用注册邮箱登录，无需重新注册。
+    </view>
+    <view class="primary-button" bindtap="login">登录账号</view>
+  </view>
+
+  <view wx:else class="card account-card">
+    <view class="account-title">账号已登录</view>
+    <view class="account-copy-text">
+      当前小程序已接入店铺浏览、点评发布与互动、收藏、关注、消息、投稿记录以及成长、资料与隐私设置；账号信息与网页端共用。
+    </view>
+
+    <view class="social-strip">
+      <view class="social-stat" data-kind="FOLLOWING" bindtap="openFollows">
+        <view class="social-value">{{socialLoading ? '…' : followingText}}</view>
+        <view class="social-label">关注</view>
+      </view>
+      <view class="social-stat" data-kind="FOLLOWERS" bindtap="openFollows">
+        <view class="social-value">{{socialLoading ? '…' : followersText}}</view>
+        <view class="social-label">粉丝</view>
+      </view>
+      <view class="social-stat" bindtap="openMyPublicProfile">
+        <view class="social-value social-value-small">主页</view>
+        <view class="social-label">公开主页</view>
+      </view>
+    </view>
+    <view wx:if="{{socialError}}" class="social-error">{{socialError}}</view>
+
+    <view class="account-menu" data-tab="reviews" bindtap="openMyContent">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">我的点评</view>
+        <view class="account-menu-sub">查看已发布点评与对应店铺</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="account-menu" data-tab="favorites" bindtap="openMyContent">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">我的收藏</view>
+        <view class="account-menu-sub">查看收藏的餐厅与食堂</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="account-menu" bindtap="openContributions">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">我的投稿 / 纠错</view>
+        <view class="account-menu-sub">查看审核进度与驳回原因</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="account-menu" bindtap="openGrowth">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">成长等级</view>
+        <view class="account-menu-sub">查看经验、等级与升级进度</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="account-menu" bindtap="openProfile">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">资料设置</view>
+        <view class="account-menu-sub">查看脱敏邮箱、编辑个人简介</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="account-menu" bindtap="openPrivacy">
+      <view class="account-menu-copy">
+        <view class="account-menu-label">隐私设置</view>
+        <view class="account-menu-sub">设置收藏、关注与粉丝名单可见性</view>
+      </view>
+      <view class="account-menu-arrow">›</view>
+    </view>
+
+    <view class="ghost-button logout-button" bindtap="confirmLogout">
+      {{loggingOut ? '退出中…' : '退出登录'}}
+    </view>
+  </view>
+
+  <view class="account-note">
+    小程序不会获取微信头像、昵称、手机号或 openid；登录仅使用注册邮箱与密码。
+  </view>
+</view>

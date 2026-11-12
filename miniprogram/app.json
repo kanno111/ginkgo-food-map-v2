@@ -1,0 +1,73 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/map/index",
+    "pages/messages/index",
+    "pages/account/index",
+    "pages/restaurant/detail/index",
+    "pages/account/content/index",
+    "pages/account/contributions/index",
+    "pages/account/contributions/detail/index",
+    "pages/account/growth/index",
+    "pages/account/profile/index",
+    "pages/account/privacy/index",
+    "pages/review/compose/index",
+    "pages/submission/index",
+    "pages/user/profile/index",
+    "pages/user/follows/index",
+    "pages/login/index",
+    "pages/register/index",
+    "pages/password-reset/index"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#e9f4ff",
+    "navigationBarTitleText": "泥电美食地图",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#e9f4ff"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#5f7183",
+    "selectedColor": "#0a84ff",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "找店",
+        "iconPath": "assets/tabbar/home.png",
+        "selectedIconPath": "assets/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/map/index",
+        "text": "地图",
+        "iconPath": "assets/tabbar/map.png",
+        "selectedIconPath": "assets/tabbar/map-active.png"
+      },
+      {
+        "pagePath": "pages/messages/index",
+        "text": "消息",
+        "iconPath": "assets/tabbar/messages.png",
+        "selectedIconPath": "assets/tabbar/messages-active.png"
+      },
+      {
+        "pagePath": "pages/account/index",
+        "text": "我的",
+        "iconPath": "assets/tabbar/account.png",
+        "selectedIconPath": "assets/tabbar/account-active.png"
+      }
+    ]
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于在地图中定位、查看附近餐厅并选择投稿店铺位置"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation",
+    "chooseLocation"
+  ],
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}
